@@ -210,19 +210,46 @@ class SignUpViewModel : ViewModel() {
                     val exists = snapshot.exists()
                     Log.d("🔥", "✅ Successfully checked child '$childKey': exists = $exists")
                     if (!exists) {
+
+                        // Prepare child image URL dynamically
+                        val storageBaseUrl = "https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o/"
+                        val sanitizedChildName = childName.lowercase().replace(Regex("[^a-z0-9]"), "")
+                        val possibleImageUrl = "$storageBaseUrl$sanitizedChildName.jpg?alt=media"
+                        val defaultImageUrl = "$storageBaseUrl/default_child.jpg?alt=media"
+
+                        // First write with default image
                         val childData = mapOf(
                             "eta" to "Arriving in 5 minutes",
                             "active" to true,
                             "displayName" to childName,
-                            "photoUrl" to "https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o/default_child.jpg?alt=media"
+                            "photoUrl" to defaultImageUrl
                         )
+
                         childRef.setValue(childData)
                             .addOnSuccessListener {
-                                Log.d("🔥", "✅ Successfully wrote child '$childKey' to Firebase")
+                                Log.d("🔥", "✅ Successfully wrote child '$childKey' to Firebase with default image")
                                 _uiState.value = _uiState.value.copy(
                                     otpErrorMessage = "Child $childName saved successfully!",
                                     showOtpError = true
                                 )
+
+                                // Now check if the actual image exists in Storage
+                                val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference
+                                val imageRef = storage.child("$sanitizedChildName.jpg")
+
+                                imageRef.metadata.addOnSuccessListener {
+                                    // Image exists: update childData with correct photoUrl
+                                    childRef.child("photoUrl").setValue(possibleImageUrl)
+                                        .addOnSuccessListener {
+                                            Log.d("🔥", "✅ Updated child '$childKey' with correct image URL")
+                                        }
+                                        .addOnFailureListener { e ->
+                                            Log.e("🔥", "❌ Failed to update child '$childKey' image URL: ${e.message}")
+                                        }
+                                }.addOnFailureListener {
+                                    // Image does not exist: leave default
+                                    Log.d("🔥", "⚠️ No uploaded image for '$childKey', keeping default")
+                                }
                             }
                             .addOnFailureListener { exception ->
                                 Log.e(
@@ -235,13 +262,7 @@ class SignUpViewModel : ViewModel() {
                                     showOtpError = true
                                 )
                             }
-                            .addOnCanceledListener {
-                                Log.e("🔥", "❌ Write to child '$childKey' was canceled")
-                                _uiState.value = _uiState.value.copy(
-                                    otpErrorMessage = "Save child '$childName' was canceled",
-                                    showOtpError = true
-                                )
-                            }
+
                     } else {
                         Log.d("🔥", "⚠️ Child '$childKey' already exists")
                     }
