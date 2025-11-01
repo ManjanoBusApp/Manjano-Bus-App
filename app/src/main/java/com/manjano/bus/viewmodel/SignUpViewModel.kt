@@ -211,54 +211,93 @@ class SignUpViewModel : ViewModel() {
                     Log.d("🔥", "✅ Successfully checked child '$childKey': exists = $exists")
                     if (!exists) {
 
-                        // Prepare child image URL dynamically
+                        // Prepare child image URL with fuzzy matching / nicknames
                         val storageBaseUrl = "https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o/"
-                        val sanitizedChildName = childName.lowercase().replace(Regex("[^a-z0-9]"), "")
-                        val possibleImageUrl = "$storageBaseUrl$sanitizedChildName.jpg?alt=media"
                         val defaultImageUrl = "$storageBaseUrl/default_child.jpg?alt=media"
+                        val sanitizedChildName = childName.lowercase().replace(Regex("[^a-z0-9]"), "")
 
-                        // First write with default image
+// Map known tricky cases / nicknames to image files
+                        val imageMap = mapOf(
+                            "naceneza" to "nezanace.jpg?alt=media",
+                            "kayrankongoliu" to "kayraumuton.jpg?alt=media",
+                            "umtonikyra" to "kayraumuton.jpg?alt=media",
+                            "doemari" to "marydoe2.jpg?alt=media"
+                        )
+
+                        // Simple Levenshtein distance function
+                        fun levenshtein(lhs: String, rhs: String): Int {
+                            val lhsLen = lhs.length
+                            val rhsLen = rhs.length
+                            val dp = Array(lhsLen + 1) { IntArray(rhsLen + 1) }
+                            for (i in 0..lhsLen) dp[i][0] = i
+                            for (j in 0..rhsLen) dp[0][j] = j
+                            for (i in 1..lhsLen) {
+                                for (j in 1..rhsLen) {
+                                    dp[i][j] = if (lhs[i - 1] == rhs[j - 1]) dp[i - 1][j - 1]
+                                    else minOf(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + 1)
+                                }
+                            }
+                            return dp[lhsLen][rhsLen]
+                        }
+
+                        // Find closest match from imageMap keys within threshold
+                        fun closestMatch(input: String, options: List<String>, threshold: Int = 5): String? {
+                            var bestMatch: String? = null
+                            var bestDistance = threshold + 1
+                            for (option in options) {
+                                val distance = levenshtein(input, option)
+                                if (distance < bestDistance) {
+                                    bestDistance = distance
+                                    bestMatch = option
+                                }
+                            }
+                            return bestMatch
+                        }
+
+// Determine final image URL with explicit handling for tricky names
+                        val finalImageUrl = when (sanitizedChildName) {
+                            "umtonikyra" -> "$storageBaseUrl${imageMap["umtonikyra"]}"
+                            "doemari" -> "$storageBaseUrl${imageMap["doemari"]}"
+                            else -> {
+                                val mapped = imageMap[sanitizedChildName]
+                                if (mapped != null) "$storageBaseUrl$mapped"
+                                else {
+                                    closestMatch(sanitizedChildName, imageMap.keys.toList())?.let { "$storageBaseUrl${imageMap[it]}" }
+                                        ?: defaultImageUrl
+                                }
+                            }
+                        }
+
+// Write child data to Firebase
                         val childData = mapOf(
                             "eta" to "Arriving in 5 minutes",
                             "active" to true,
                             "displayName" to childName,
-                            "photoUrl" to defaultImageUrl
+                            "photoUrl" to finalImageUrl
                         )
 
                         childRef.setValue(childData)
                             .addOnSuccessListener {
-                                Log.d("🔥", "✅ Successfully wrote child '$childKey' to Firebase with default image")
+                                Log.d("🔥", "✅ Successfully wrote child '$childKey' to Firebase")
                                 _uiState.value = _uiState.value.copy(
                                     otpErrorMessage = "Child $childName saved successfully!",
                                     showOtpError = true
                                 )
-
-                                // Now check if the actual image exists in Storage
+                                // Optional: check if image exists in Storage and confirm photoUrl
                                 val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference
-                                val imageRef = storage.child("$sanitizedChildName.jpg")
-
+                                val imageRef = storage.child("${sanitizedChildName}.jpg")
                                 imageRef.metadata.addOnSuccessListener {
-                                    // Image exists: update childData with correct photoUrl
-                                    childRef.child("photoUrl").setValue(possibleImageUrl)
-                                        .addOnSuccessListener {
-                                            Log.d("🔥", "✅ Updated child '$childKey' with correct image URL")
-                                        }
-                                        .addOnFailureListener { e ->
-                                            Log.e("🔥", "❌ Failed to update child '$childKey' image URL: ${e.message}")
-                                        }
+                                    // Confirm photoUrl
+                                    childRef.child("photoUrl").setValue(finalImageUrl)
                                 }.addOnFailureListener {
-                                    // Image does not exist: leave default
-                                    Log.d("🔥", "⚠️ No uploaded image for '$childKey', keeping default")
+                                    Log.d("🔥", "⚠️ No uploaded image for '$childKey', keeping finalImageUrl")
                                 }
                             }
-                            .addOnFailureListener { exception ->
-                                Log.e(
-                                    "🔥",
-                                    "❌ Failed to write child '$childKey': ${exception.message}",
-                                    exception
-                                )
+
+                            .addOnFailureListener { e ->
+                                Log.e("🔥", "❌ Failed to write child '$childKey': ${e.message}", e)
                                 _uiState.value = _uiState.value.copy(
-                                    otpErrorMessage = "Failed to save child '$childName': ${exception.message}",
+                                    otpErrorMessage = "Failed to save child '$childName': ${e.message}",
                                     showOtpError = true
                                 )
                             }
