@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="activity_horizontal_margin">24dp</dimen>
+    <dimen name="standard_padding">12dp</dimen>
+    <dimen name="spacing_large">24dp</dimen>
+</resources>

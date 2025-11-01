@@ -1,0 +1,30 @@
+{
+  "project_info": {
+    "project_number": "585937380666",
+    "firebase_url": "https://manjano-bus-default-rtdb.firebaseio.com",
+    "project_id": "manjano-bus",
+    "storage_bucket": "manjano-bus.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:585937380666:android:f3a8294477336b6b6e5c03",
+        "android_client_info": {
+          "package_name": "com.manjano.bus"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDDOV_RPS9epNux1l24jnmO3nBYy8OR5As"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,0 +1,48 @@
+# Android build files
+/build/
+/.gradle/
+/local.properties
+/.idea/
+/.cxx/
+
+# IntelliJ/Android Studio
+*.iml
+.idea/*
+!/.idea/gradle.xml
+!/.idea/modules.xml
+!/.idea/runConfigurations
+!/.idea/vcs.xml
+
+# Kotlin
+*.kotlin_module
+
+# Log and crash files
+*.log
+*.hprof
+
+# OS junk files
+.DS_Store
+Thumbs.db
+
+# Firebase/Google Services (keep JSON if needed)
+# google-services.json   <-- uncomment if you don’t want to commit it
+
+# NDK/Build cache
+.externalNativeBuild/
+.cxx/
+
+# Jetpack Compose preview cache
+.idea/assetWizardSettings.xml
+.idea/deploymentTargetDropDown.xml
+.idea/markdown-navigator.xml
+
+# Node, React Native (if added)
+node_modules/
+npm-debug.log
+
+# Misc
+*.apk
+*.ap_
+*.dex
+captures/
+output.json

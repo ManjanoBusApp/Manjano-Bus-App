@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- Base application theme for dark mode -->
+    <style name="Theme.Manjano.NoActionBar" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <!-- Transparent status bar so Compose can draw behind it -->
+        <item name="android:statusBarColor">@android:color/transparent</item>
+
+        <!-- Status bar icons light in dark mode -->
+        <item name="android:windowLightStatusBar">false</item>
+
+        <!-- Transparent window background for edge-to-edge -->
+        <item name="android:windowBackground">@android:color/transparent</item>
+    </style>
+
+</resources>

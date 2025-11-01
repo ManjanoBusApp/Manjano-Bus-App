@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Existing strings -->
+    <string name="app_name">Manjano</string>
+    <string name="login_title">Login to your account</string>
+    <string name="email_hint">Email Address</string>
+    <string name="password_hint">Password</string>
+    <string name="login_button">Login</string>
+    <string name="forgot_password">Forgot Password?</string>
+    <string name="signup_prompt">Ne Here? Sign Up</string>
+    <string name="welcome_to">Welcome to</string>
+    <string name="manjano_bus_app">Manjano Bus App</string>
+    <string name="login">Login</string>
+    <string name="enter_otp">Enter the OTP sent to your phone</string>
+    <string name="otp_hint">One-Time Password</string>
+    <string name="verify">Verify</string>
+    <string name="enter_phone">Enter your phone number</string>
+    <string name="send_otp">Send OTP</string>
+    <string name="full_name">Full Name</string>
+    <string name="child_name">Name of Child</string>
+    <string name="email">Email</string>
+    <string name="save_profile">Save Profile</string>
+
+    <!-- New strings added for ProfileSetupActivity -->
+    <string name="error_user_not_signed_in">User not signed in</string>
+    <string name="error_network_unavailable">Network unavailable</string>
+    <string name="error_permission_denied">Permission denied</string>
+    <string name="error_save_failed_generic">Failed to save profile</string>
+    <string name="error_network_connection">Network connection error</string>
+
+    <string name="error_full_name_required">Full name is required</string>
+    <string name="error_full_name_required_toast">Please enter your full name</string>
+    <string name="error_name_invalid">Invalid name</string>
+    <string name="error_name_invalid_toast">Please enter a valid name</string>
+    <string name="error_name_too_short">Name too short</string>
+    <string name="error_name_too_short_toast">Name must be at least 2 characters</string>
+    <string name="error_name_too_long">Name too long</string>
+    <string name="error_name_too_long_toast">Name cannot exceed 50 characters</string>
+    <string name="error_include_both_names">Please include both first and last name</string>
+
+    <string name="save_profile_button_desc">Save Profile button</string>
+    <string name="loading_indicator_desc">Loading indicator</string>
+    <string name="blocking_overlay_desc">Blocking overlay</string>
+    <string name="full_name_input_desc">Full Name input field</string>
+    <string name="saving">Saving…</string>
+
+    <string name="profile_save_success">Profile saved successfully!</string>
+    <string name="loading_screen_announcement">Loading, please wait…</string>
+    <string name="full_name_hint">Full Name</string>
+    <string name="save_profile_button">Save Profile</string>
+
+    <!-- Strings missing from Compose version -->
+    <string name="profile_setup_title">Set up your profile</string>
+    <string name="navigate_back_desc">Navigate Back</string>
+    <string name="exit_dialog_title">Exit</string>
+    <string name="exit_dialog_message">Are you sure you want to exit without saving?</string>
+    <string name="exit_button_desc">Exit Button</string>
+    <string name="stay_button_desc">Stay Button</string>
+    <string name="exit">Exit</string>
+    <string name="stay">Stay</string>
+</resources>
