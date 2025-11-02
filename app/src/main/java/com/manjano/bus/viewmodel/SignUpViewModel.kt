@@ -1,19 +1,20 @@
 package com.manjano.bus.viewmodel
 
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import com.manjano.bus.utils.Constants
-import com.google.firebase.FirebaseApp
-import com.google.firebase.database.FirebaseDatabase
-import android.util.Log
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
+import android.util.Log
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.google.firebase.FirebaseApp
+import com.google.firebase.database.FirebaseDatabase
+import com.manjano.bus.utils.Constants
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
+
 
 data class SignUpUiState(
     val otpDigits: List<String> = List(Constants.OTP_LENGTH) { "" },
@@ -181,6 +182,7 @@ class SignUpViewModel : ViewModel() {
 
     fun saveUserNames(parentName: String, childrenNames: String, context: Context) {
         Log.d("🔥", "saveUserNames() called with parent: $parentName, children: $childrenNames")
+
         _uiState.value = _uiState.value.copy(
             parentName = parentName,
             childrenNames = childrenNames
@@ -198,179 +200,98 @@ class SignUpViewModel : ViewModel() {
         Log.d("🔥", "🔍 Running Firebase connection test before saving...")
         testFirebaseConnection()
 
-        val childrenList = childrenNames.split(",").map { it.trim() }
+        // Helper to normalize names for matching
+        fun normalizeName(name: String): String =
+            name.lowercase().replace(Regex("[^a-z0-9]"), "")
 
-        childrenList.forEach { childName ->
-            if (childName.isNotEmpty()) {
-                val childKey = childName.lowercase().replace(Regex("[^a-z0-9]"), "_")
-                Log.d("🔥", "🔍 Checking if child '$childKey' exists in Firebase...")
-                val childRef = database.child("children").child(childKey)
+        // ✅ New: List all image files from the "Children Images" folder in Firebase Storage
+        val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
+            .reference
+            .child("Children Images") // 👈 point to correct folder where images are stored
 
-                childRef.get().addOnSuccessListener { snapshot ->
-                    val exists = snapshot.exists()
-                    Log.d("🔥", "✅ Successfully checked child '$childKey': exists = $exists")
-                    if (!exists) {
+        val imageBaseNames = mutableMapOf<String, String>()  // normalized name -> full file name
 
-                        // Aggressive normalization and improved image mapping
-                        val storageBaseUrl = "https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o/"
-                        val defaultImageUrl = "$storageBaseUrl/default_child.jpg?alt=media"
+        storage.listAll()
+            .addOnSuccessListener { listResult ->
+                Log.d("🔥", "✅ Listed ${listResult.items.size} files from Storage")
 
-                        // Function to aggressively normalize names
-                        fun normalizeName(name: String): String =
-                            name.lowercase().replace(Regex("[^a-z0-9]"), "")
+                listResult.items.forEach { item ->
+                    val fullName = item.name
+                    val baseName = fullName.substringBeforeLast('.')
+                    val normalizedBase = normalizeName(baseName)
+                    imageBaseNames[normalizedBase] = fullName
+                    Log.d("🔥", "📸 Found: $fullName → normalized=$normalizedBase")
+                }
 
-// ✅ Explicit alias mapping for tricky names (no extensions)
-                        val explicitAliases = mapOf(
-                            "umtonikyra" to "kayraumutoni",
-                            "kayrankongoliu" to "kayraumutoni",
-                            "doemari" to "marydoe2",
-                            "galinana" to "nanagally",
-                            "pikmotofue" to "motopiki"
-                        )
+                val childrenList = childrenNames.split(",").map { it.trim() }
 
-// ✅ Base image map (no extensions)
-                        val imageMap = mapOf(
-                            "naceneza" to "nezanace",
-                            "kayraumuton" to "kayraumuton",
-                            "doemari" to "marydoe2",
-                            "galinana" to "nanagally",
-                            "motopiki" to "motopiki"
-                        )
+                childrenList.forEach { childName ->
+                    if (childName.isNotEmpty()) {
+                        val childKey = childName.lowercase().replace(Regex("[^a-z0-9]"), "_")
+                        val sanitizedChildName = normalizeName(childName)
 
-
-// Normalize the child name
-                        val normalizedChild = normalizeName(childName)
-
-// Step 1: Check explicit aliases first
-                        val aliasMatch = explicitAliases.entries.firstOrNull {
-                            normalizeName(it.key) == normalizedChild
-                        }?.value
-
-                        // Step 2: Fuzzy match with Levenshtein if no alias found
+                        // Simple Levenshtein fuzzy matching
                         fun levenshtein(lhs: String, rhs: String): Int {
-                            val lhsLen = lhs.length
-                            val rhsLen = rhs.length
-                            val dp = Array(lhsLen + 1) { IntArray(rhsLen + 1) }
-                            for (i in 0..lhsLen) dp[i][0] = i
-                            for (j in 0..rhsLen) dp[0][j] = j
-                            for (i in 1..lhsLen) {
-                                for (j in 1..rhsLen) {
-                                    dp[i][j] = if (lhs[i - 1] == rhs[j - 1]) dp[i - 1][j - 1]
-                                    else minOf(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + 1)
+                            val dp = Array(lhs.length + 1) { IntArray(rhs.length + 1) }
+                            for (i in 0..lhs.length) dp[i][0] = i
+                            for (j in 0..rhs.length) dp[0][j] = j
+                            for (i in 1..lhs.length) {
+                                for (j in 1..rhs.length) {
+                                    val cost = if (lhs[i - 1] == rhs[j - 1]) 0 else 1
+                                    dp[i][j] = minOf(
+                                        dp[i - 1][j] + 1,
+                                        dp[i][j - 1] + 1,
+                                        dp[i - 1][j - 1] + cost
+                                    )
                                 }
                             }
-                            return dp[lhsLen][rhsLen]
+                            return dp[lhs.length][rhs.length]
                         }
 
-                        fun closestMatch(input: String, options: List<String>, threshold: Int = 6): String? {
-                            var bestMatch: String? = null
-                            var bestDistance = threshold + 1
-                            for (option in options) {
-                                val distance = levenshtein(input, option)
-                                if (distance < bestDistance) {
-                                    bestDistance = distance
-                                    bestMatch = option
+                        val bestMatch = imageBaseNames.keys.minByOrNull { levenshtein(it, sanitizedChildName) }
+
+                        val chosenBase = imageBaseNames.keys.find { key ->
+                            key.contains(sanitizedChildName, ignoreCase = true) ||
+                                    sanitizedChildName.contains(key, ignoreCase = true)
+                        } ?: bestMatch
+
+                        val finalFileName = if (chosenBase != null) imageBaseNames[chosenBase] else "default_child.jpg"
+
+                        val imageRef = storage.child(finalFileName!!)
+
+                        imageRef.downloadUrl.addOnSuccessListener { uri ->
+                            val photoUrl = uri.toString()
+                            val childRef = com.google.firebase.database.FirebaseDatabase
+                                .getInstance()
+                                .getReference("children")
+                                .child(childKey)
+
+                            val childData = mapOf(
+                                "eta" to "Arriving in 5 minutes",
+                                "active" to true,
+                                "displayName" to childName,
+                                "photoUrl" to photoUrl
+                            )
+
+                            childRef.setValue(childData)
+                                .addOnSuccessListener {
+                                    Log.d("🔥", "✅ Saved '$childKey' with image ${imageRef.name}")
                                 }
-                            }
-                            return bestMatch
-                        }
-
-// Determine final mapped key with more forgiving matching
-                        val mappedKey = aliasMatch ?: run {
-                            val closest = closestMatch(normalizedChild, imageMap.keys.toList(), threshold = 8)
-                            // Also allow partial contains matches both ways
-                            val partial = imageMap.keys.firstOrNull { key ->
-                                normalizedChild.contains(key) || key.contains(normalizedChild)
-                            }
-                            partial ?: closest
-                        }
-
-// Build final image URL
-                        val baseImageName = mappedKey?.let { imageMap[it] ?: it }
-                        val finalImageUrl = baseImageName?.let {
-                            "$storageBaseUrl$it.jpg?alt=media"
-                        } ?: defaultImageUrl
-
-
-
-// Write child data to Firebase
-                        val childData = mapOf(
-                            "eta" to "Arriving in 5 minutes",
-                            "active" to true,
-                            "displayName" to childName,
-                            "photoUrl" to finalImageUrl
-                        )
-
-                        childRef.setValue(childData)
-                            .addOnSuccessListener {
-                                Log.d("🔥", "✅ Successfully wrote child '$childKey' to Firebase")
-                                _uiState.value = _uiState.value.copy(
-                                    otpErrorMessage = "Child $childName saved successfully!",
-                                    showOtpError = true
-                                )
-                                // ✅ Auto-detect image file extension (.jpg, .jpeg, .png)
-                                val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference
-
-                                val possibleExtensions = listOf("jpg", "jpeg", "png")
-                                var foundUrl: String? = null
-
-                                fun checkNextExtension(index: Int = 0) {
-                                    if (index >= possibleExtensions.size) {
-                                        // None found, keep default/fallback URL
-                                        Log.d("🔥", "⚠️ No image found for '$childKey', keeping finalImageUrl")
-                                        childRef.child("photoUrl").setValue(finalImageUrl)
-                                        return
-                                    }
-
-                                    val ext = possibleExtensions[index]
-                                    val imageRef = storage.child("${normalizedChild}.$ext")
-
-                                    imageRef.metadata.addOnSuccessListener {
-                                        // ✅ Found valid image file — build and save the correct URL
-                                        foundUrl =
-                                            "https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o/${normalizedChild}.$ext?alt=media"
-                                        Log.d("🔥", "✅ Found image for '$childKey': $foundUrl")
-                                        childRef.child("photoUrl").setValue(foundUrl)
-                                    }.addOnFailureListener {
-                                        // Try the next extension
-                                        checkNextExtension(index + 1)
-                                    }
+                                .addOnFailureListener { e ->
+                                    Log.e("🔥", "❌ Failed to save '$childKey': ${e.message}", e)
                                 }
-
-// Start recursive search
-                                checkNextExtension()
-
-                            }
-
-                            .addOnFailureListener { e ->
-                                Log.e("🔥", "❌ Failed to write child '$childKey': ${e.message}", e)
-                                _uiState.value = _uiState.value.copy(
-                                    otpErrorMessage = "Failed to save child '$childName': ${e.message}",
-                                    showOtpError = true
-                                )
-                            }
-
-                    } else {
-                        Log.d("🔥", "⚠️ Child '$childKey' already exists")
+                        }.addOnFailureListener {
+                            Log.e("🔥", "❌ Failed to get image URL for $childName: ${it.message}")
+                        }
                     }
-                }.addOnFailureListener { exception ->
-                    Log.e(
-                        "🔥",
-                        "❌ Failed to check child '$childKey': ${exception.message}",
-                        exception
-                    )
-                    _uiState.value = _uiState.value.copy(
-                        otpErrorMessage = "Failed to check child '$childName': ${exception.message}",
-                        showOtpError = true
-                    )
-                }.addOnCanceledListener {
-                    Log.e("🔥", "❌ Check for child '$childKey' was canceled")
-                    _uiState.value = _uiState.value.copy(
-                        otpErrorMessage = "Check for child '$childName' was canceled",
-                        showOtpError = true
-                    )
                 }
             }
-        }
+            .addOnFailureListener { e ->
+                Log.e("🔥", "❌ Failed to list Storage files: ${e.message}", e)
+                _uiState.value = _uiState.value.copy(
+                    otpErrorMessage = "Failed to list images: ${e.message}",
+                    showOtpError = true
+                )
+            }
     }
 }
