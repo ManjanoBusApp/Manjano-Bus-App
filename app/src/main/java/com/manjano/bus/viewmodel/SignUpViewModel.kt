@@ -275,14 +275,22 @@ class SignUpViewModel : ViewModel() {
                             return bestMatch
                         }
 
-// Determine final mapped key
-                        val mappedKey = aliasMatch ?: closestMatch(normalizedChild, imageMap.keys.toList())
+// Determine final mapped key with more forgiving matching
+                        val mappedKey = aliasMatch ?: run {
+                            val closest = closestMatch(normalizedChild, imageMap.keys.toList(), threshold = 8)
+                            // Also allow partial contains matches both ways
+                            val partial = imageMap.keys.firstOrNull { key ->
+                                normalizedChild.contains(key) || key.contains(normalizedChild)
+                            }
+                            partial ?: closest
+                        }
 
-// Final image URL
+// Build final image URL
                         val baseImageName = mappedKey?.let { imageMap[it] ?: it }
                         val finalImageUrl = baseImageName?.let {
-                            "$storageBaseUrl$it.jpg?alt=media" // Temporary until actual extension detection below
+                            "$storageBaseUrl$it.jpg?alt=media"
                         } ?: defaultImageUrl
+
 
 
 // Write child data to Firebase
