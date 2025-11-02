@@ -211,20 +211,42 @@ class SignUpViewModel : ViewModel() {
                     Log.d("🔥", "✅ Successfully checked child '$childKey': exists = $exists")
                     if (!exists) {
 
-                        // Prepare child image URL with fuzzy matching / nicknames
+                        // Aggressive normalization and improved image mapping
                         val storageBaseUrl = "https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o/"
                         val defaultImageUrl = "$storageBaseUrl/default_child.jpg?alt=media"
-                        val sanitizedChildName = childName.lowercase().replace(Regex("[^a-z0-9]"), "")
 
-// Map known tricky cases / nicknames to image files
-                        val imageMap = mapOf(
-                            "naceneza" to "nezanace.jpg?alt=media",
-                            "kayrankongoliu" to "kayraumuton.jpg?alt=media",
-                            "umtonikyra" to "kayraumuton.jpg?alt=media",
-                            "doemari" to "marydoe2.jpg?alt=media"
+                        // Function to aggressively normalize names
+                        fun normalizeName(name: String): String =
+                            name.lowercase().replace(Regex("[^a-z0-9]"), "")
+
+// ✅ Explicit alias mapping for tricky names (no extensions)
+                        val explicitAliases = mapOf(
+                            "umtonikyra" to "kayraumutoni",
+                            "kayrankongoliu" to "kayraumutoni",
+                            "doemari" to "marydoe2",
+                            "galinana" to "nanagally",
+                            "pikmotofue" to "motopiki"
                         )
 
-                        // Simple Levenshtein distance function
+// ✅ Base image map (no extensions)
+                        val imageMap = mapOf(
+                            "naceneza" to "nezanace",
+                            "kayraumuton" to "kayraumuton",
+                            "doemari" to "marydoe2",
+                            "galinana" to "nanagally",
+                            "motopiki" to "motopiki"
+                        )
+
+
+// Normalize the child name
+                        val normalizedChild = normalizeName(childName)
+
+// Step 1: Check explicit aliases first
+                        val aliasMatch = explicitAliases.entries.firstOrNull {
+                            normalizeName(it.key) == normalizedChild
+                        }?.value
+
+                        // Step 2: Fuzzy match with Levenshtein if no alias found
                         fun levenshtein(lhs: String, rhs: String): Int {
                             val lhsLen = lhs.length
                             val rhsLen = rhs.length
@@ -240,8 +262,7 @@ class SignUpViewModel : ViewModel() {
                             return dp[lhsLen][rhsLen]
                         }
 
-                        // Find closest match from imageMap keys within threshold
-                        fun closestMatch(input: String, options: List<String>, threshold: Int = 5): String? {
+                        fun closestMatch(input: String, options: List<String>, threshold: Int = 6): String? {
                             var bestMatch: String? = null
                             var bestDistance = threshold + 1
                             for (option in options) {
@@ -254,19 +275,15 @@ class SignUpViewModel : ViewModel() {
                             return bestMatch
                         }
 
-// Determine final image URL with explicit handling for tricky names
-                        val finalImageUrl = when (sanitizedChildName) {
-                            "umtonikyra" -> "$storageBaseUrl${imageMap["umtonikyra"]}"
-                            "doemari" -> "$storageBaseUrl${imageMap["doemari"]}"
-                            else -> {
-                                val mapped = imageMap[sanitizedChildName]
-                                if (mapped != null) "$storageBaseUrl$mapped"
-                                else {
-                                    closestMatch(sanitizedChildName, imageMap.keys.toList())?.let { "$storageBaseUrl${imageMap[it]}" }
-                                        ?: defaultImageUrl
-                                }
-                            }
-                        }
+// Determine final mapped key
+                        val mappedKey = aliasMatch ?: closestMatch(normalizedChild, imageMap.keys.toList())
+
+// Final image URL
+                        val baseImageName = mappedKey?.let { imageMap[it] ?: it }
+                        val finalImageUrl = baseImageName?.let {
+                            "$storageBaseUrl$it.jpg?alt=media" // Temporary until actual extension detection below
+                        } ?: defaultImageUrl
+
 
 // Write child data to Firebase
                         val childData = mapOf(
@@ -283,15 +300,38 @@ class SignUpViewModel : ViewModel() {
                                     otpErrorMessage = "Child $childName saved successfully!",
                                     showOtpError = true
                                 )
-                                // Optional: check if image exists in Storage and confirm photoUrl
+                                // ✅ Auto-detect image file extension (.jpg, .jpeg, .png)
                                 val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference
-                                val imageRef = storage.child("${sanitizedChildName}.jpg")
-                                imageRef.metadata.addOnSuccessListener {
-                                    // Confirm photoUrl
-                                    childRef.child("photoUrl").setValue(finalImageUrl)
-                                }.addOnFailureListener {
-                                    Log.d("🔥", "⚠️ No uploaded image for '$childKey', keeping finalImageUrl")
+
+                                val possibleExtensions = listOf("jpg", "jpeg", "png")
+                                var foundUrl: String? = null
+
+                                fun checkNextExtension(index: Int = 0) {
+                                    if (index >= possibleExtensions.size) {
+                                        // None found, keep default/fallback URL
+                                        Log.d("🔥", "⚠️ No image found for '$childKey', keeping finalImageUrl")
+                                        childRef.child("photoUrl").setValue(finalImageUrl)
+                                        return
+                                    }
+
+                                    val ext = possibleExtensions[index]
+                                    val imageRef = storage.child("${normalizedChild}.$ext")
+
+                                    imageRef.metadata.addOnSuccessListener {
+                                        // ✅ Found valid image file — build and save the correct URL
+                                        foundUrl =
+                                            "https://firebasestorage.googleapis.com/v0/b/YOUR_PROJECT_ID.appspot.com/o/${normalizedChild}.$ext?alt=media"
+                                        Log.d("🔥", "✅ Found image for '$childKey': $foundUrl")
+                                        childRef.child("photoUrl").setValue(foundUrl)
+                                    }.addOnFailureListener {
+                                        // Try the next extension
+                                        checkNextExtension(index + 1)
+                                    }
                                 }
+
+// Start recursive search
+                                checkNextExtension()
+
                             }
 
                             .addOnFailureListener { e ->
