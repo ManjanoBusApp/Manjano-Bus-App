@@ -215,18 +215,38 @@ fun ParentDashboardScreen(
                             }
                         }
 
-                        // NEW: Collect photoUrl for each child into the local map
+                        // Collect photoUrl for each child into the local map (use default if missing)
+                        // ✅ Collect photoUrl for each child with strict matching and safe default fallback
                         scope.launch {
                             viewModel.getPhotoUrlFlow(key).collect { url ->
-                                // ignore placeholder/error states from ViewModel
-                                if (!url.isNullOrBlank() && url != "Error loading photo") {
-                                    childrenPhotoMap[key] = url
-                                    Log.d("🖼️ childrenPhotoMap", "Updated $key -> $url")
+                                // Normalize child key for consistent matching
+                                val normalizedKey = key.trim()
+                                    .replace(" ", "")
+                                    .replace("_", "")
+                                    .replace("-", "")
+                                    .lowercase()
 
-                                    // If this key is currently selected, update the selectedChild's photo immediately
+                                // Ensure the fetched URL truly belongs to this child (not random)
+                                val belongsToChild = url.contains(normalizedKey, ignoreCase = true)
+
+                                val safeUrl = if (
+                                    url.isNullOrBlank() ||
+                                    url == "Error loading photo" ||
+                                    url.contains("default_child", ignoreCase = true) ||
+                                    !belongsToChild
+                                ) {
+                                    defaultPhotoUrl
+                                } else {
+                                    url
+                                }
+
+                                if (childrenPhotoMap[key] != safeUrl) {
+                                    childrenPhotoMap[key] = safeUrl
+                                    Log.d("🖼️ childrenPhotoMap", "Updated $key -> $safeUrl (belongs=$belongsToChild)")
+
                                     val currentlySelectedKey = selectedChild.value.name.trim().lowercase()
                                     if (currentlySelectedKey == key) {
-                                        selectedChild.value = selectedChild.value.copy(photoUrl = url)
+                                        selectedChild.value = selectedChild.value.copy(photoUrl = safeUrl)
                                     }
                                 }
                             }

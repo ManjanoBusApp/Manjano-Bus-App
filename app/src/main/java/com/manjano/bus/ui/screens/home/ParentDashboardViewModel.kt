@@ -7,12 +7,16 @@ import com.google.firebase.database.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class ParentDashboardViewModel : ViewModel() {
 
     private val database =
         FirebaseDatabase.getInstance("https://manjano-bus-default-rtdb.firebaseio.com/")
             .reference
+
     // real-time children list (paste inside ParentDashboardViewModel, after `database`)
     private val _childrenKeys = MutableStateFlow<List<String>>(emptyList())
     val childrenKeys: StateFlow<List<String>> = _childrenKeys
@@ -43,7 +47,8 @@ class ParentDashboardViewModel : ViewModel() {
             }
         }
 
-        override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) { /* ignore */ }
+        override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) { /* ignore */
+        }
 
         override fun onCancelled(error: DatabaseError) {
             Log.e("🔥", "childrenEventListener cancelled: ${error.message}")
@@ -337,33 +342,66 @@ class ParentDashboardViewModel : ViewModel() {
                 Log.e("🔥", "❌ Failed to send message: ${e.message}")
             }
     }
-    fun getPhotoUrlFlow(childName: String): StateFlow<String> {
-        val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-        Log.d("🔥", "🔍 Observing photoUrl for '$key' (original: $childName)")
 
-        val photoFlow = MutableStateFlow("https://firebasestorage.googleapis.com/v0/b/manjano-bus.appspot.com/o/default_child.jpg?alt=media")
-        val ref = database.child("children").child(key).child("photoUrl")
+    companion object {
+        private const val DEFAULT_CHILD_PHOTO_URL =
+            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.appspot.com/o/default_child.jpg?alt=media"
+    }
+
+    private fun saveChildImage(childKey: String, displayName: String, storageFiles: List<String>) {
+        // Normalize child name
+        val normalizedChild = childKey.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+
+        // Find matching file in Storage — exact match only
+        val matchedFile = storageFiles.firstOrNull {
+            it.substringBeforeLast(".").lowercase() == normalizedChild
+        }
+
+        // If no matching file, assign default
+        val finalUrl = if (matchedFile.isNullOrBlank()) {
+            DEFAULT_CHILD_PHOTO_URL
+        } else {
+            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.appspot.com/o/$matchedFile?alt=media"
+        }
+
+        // ✅ Proper logging
+        Log.d("🔥", "✅ Saved '$childKey' with image URL: $finalUrl")
+
+        // Save to database
+        database.child("children").child(normalizedChild).child("photoUrl")
+            .setValue(finalUrl)
+            .addOnSuccessListener { Log.d("🔥", "✅ Photo URL saved for '$childKey'") }
+            .addOnFailureListener { e ->
+                Log.e("🔥", "❌ Failed to save photo URL for '$childKey': ${e.message}")
+            }
+    }
+
+    fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
+        val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+
+        val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
+
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val url = snapshot.getValue(String::class.java) ?: photoFlow.value
-                if (photoFlow.value != url) {
-                    Log.d("🔥", "✅ Photo URL update from Firebase: '$url'")
-                    photoFlow.value = url
+                val url = snapshot.getValue(String::class.java).orEmpty()
+
+                val safeUrl = if (url.isBlank() || url == "Error loading photo") {
+                    DEFAULT_CHILD_PHOTO_URL
+                } else {
+                    url
                 }
+
+                trySend(safeUrl).isSuccess
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (photoFlow.value != "Error loading photo") {
-                    Log.e("🔥", "❌ Failed to fetch photoUrl: ${error.message}")
-                    photoFlow.value = "Error loading photo"
-                }
+                trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
             }
         }
 
-        ref.addValueEventListener(listener)
-        addCloseableListener(ref, listener)
+        dbRef.addValueEventListener(listener)
 
-        return photoFlow
-    }
+        awaitClose { dbRef.removeEventListener(listener) }
+    }.distinctUntilChanged()
 }
 
