@@ -255,7 +255,7 @@ class SignUpViewModel : ViewModel() {
                                     sanitizedChildName.contains(key, ignoreCase = true)
                         } ?: bestMatch
 
-                        val finalFileName = if (chosenBase != null) imageBaseNames[chosenBase] else "default_child.jpg"
+                        val finalFileName = if (chosenBase != null) imageBaseNames[chosenBase] else "a.png"
 
                         val imageRef = storage.child(finalFileName!!)
 
@@ -268,8 +268,7 @@ class SignUpViewModel : ViewModel() {
 
                             val childData = mapOf(
                                 "eta" to "Arriving in 5 minutes",
-                                "active" to true,
-                                "displayName" to childName,
+                                "active" to true,                               "displayName" to childName,
                                 "photoUrl" to photoUrl
                             )
 
