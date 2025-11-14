@@ -255,9 +255,17 @@ class SignUpViewModel : ViewModel() {
                                     sanitizedChildName.contains(key, ignoreCase = true)
                         } ?: bestMatch
 
-                        val finalFileName = if (chosenBase != null) imageBaseNames[chosenBase] else "a.png"
+                        // If we matched a child image in "Children Images" use it, otherwise point to the explicit Default Image folder fallback.
+                        val finalFileName = if (chosenBase != null) imageBaseNames[chosenBase] else null
 
-                        val imageRef = storage.child(finalFileName!!)
+                        val imageRef = if (finalFileName != null) {
+                            // file exists in Children Images folder
+                            storage.child(finalFileName)
+                        } else {
+                            // fallback: explicit reference to Default Image/defaultchild.png
+                            // storage is reference to "Children Images" — use storage.root to access the top-level then child the correct folder
+                            storage.root.child("Default Image").child("defaultchild.png")
+                        }
 
                         imageRef.downloadUrl.addOnSuccessListener { uri ->
                             val photoUrl = uri.toString()

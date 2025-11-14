@@ -63,7 +63,7 @@ data class Child(
 )
 
 private val defaultPhotoUrl =
-    "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2Fa.png?alt=media&token=872fbf13-7827-4c3e-9657-b428545ccca4"
+    "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
 
 @Composable
 fun ParentDashboardScreen(

@@ -376,7 +376,7 @@ class ParentDashboardViewModel : ViewModel() {
 
     companion object {
         private const val DEFAULT_CHILD_PHOTO_URL =
-            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2Fa.png?alt=media&token=872fbf13-7827-4c3e-9657-b428545ccca4"
+            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
     }
 
 
@@ -397,10 +397,13 @@ class ParentDashboardViewModel : ViewModel() {
 
         // ✅ Only use exact match; no partial or substring matching
         val finalUrl = if (matchedFile == null) {
+            // fallback to explicit Default Image file
             DEFAULT_CHILD_PHOTO_URL
         } else {
+            // matchedFile is the filename in Children Images — include the folder path in the public URL
             "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
         }
+
 
         Log.d("🔥", "✅ Saved '$childKey' → ${if (matchedFile == null) "a.png" else matchedFile}")
 
@@ -435,18 +438,17 @@ class ParentDashboardViewModel : ViewModel() {
 
                         if (matchedFile != null) {
                             val verifiedUrl =
-                                "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/$matchedFile?alt=media"
+                                "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
                             if (currentUrl != verifiedUrl) {
                                 database.child("children").child(normalizedKey).child("photoUrl").setValue(verifiedUrl)
                                 Log.d("🧩 repairAllChildImages", "✅ Updated $displayName → $verifiedUrl")
                             }
+
                         } else {
-                            // no matching image file found — ensure default is set
-                            if (currentUrl.isNullOrBlank() || !currentUrl.contains("default_child", true)) {
-                                database.child("children").child(normalizedKey).child("photoUrl")
-                                    .setValue(DEFAULT_CHILD_PHOTO_URL)
-                                Log.d("🧩 repairAllChildImages", "🩹 Set $displayName → DEFAULT")
-                            }
+                            // no matching image file found — explicitly set the new default image
+                            database.child("children").child(normalizedKey).child("photoUrl")
+                                .setValue(DEFAULT_CHILD_PHOTO_URL)
+                            Log.d("🧩 repairAllChildImages", "🩹 Set $displayName → DEFAULT")
                         }
                     }
                 } else {
@@ -481,7 +483,8 @@ class ParentDashboardViewModel : ViewModel() {
                 val safeUrl = when {
                     url.isBlank() || !belongsToChild -> {
                         matchedFile?.let {
-                            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/$it?alt=media"
+                            // include the Children Images folder path so the public URL actually points to the file
+                            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$it?alt=media"
                         } ?: DEFAULT_CHILD_PHOTO_URL
                     }
 
