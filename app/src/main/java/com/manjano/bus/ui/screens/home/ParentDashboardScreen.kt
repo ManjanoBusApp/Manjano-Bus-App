@@ -216,7 +216,7 @@ fun ParentDashboardScreen(
                 val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
                 val childrenPhotoMap = remember { mutableStateMapOf<String, String>() }
 
-                LaunchedEffect(childrenKeys) {
+                LaunchedEffect(childrenKeys, storageFiles) {
                     childrenKeys.forEach { key ->
                         // Collect displayName (existing behavior)
                         scope.launch {
@@ -241,6 +241,7 @@ fun ParentDashboardScreen(
 
                                     val selectedKey = selectedChild.value.name.trim().lowercase()
                                     if (selectedKey == key) {
+                                        // immediate UI update for selected child
                                         selectedChild.value = selectedChild.value.copy(photoUrl = safeUrl)
                                     }
                                 }
@@ -320,7 +321,7 @@ fun ParentDashboardScreen(
 
                 var etaText by remember { mutableStateOf("Loading...") }
 
-                LaunchedEffect(selectedChild.value.name) {
+                LaunchedEffect(selectedChild.value.name, storageFiles) {
 
                     // --- STATUS FLOW ---
                     launch {
@@ -360,6 +361,7 @@ fun ParentDashboardScreen(
                 val painter = rememberAsyncImagePainter(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(childPhotoUrl)
+                        .memoryCacheKey(childPhotoUrl)      // ← ensure Coil keys cache by exact URL
                         .crossfade(true)
                         .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                         .memoryCachePolicy(coil.request.CachePolicy.ENABLED)

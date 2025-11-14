@@ -460,18 +460,57 @@ class ParentDashboardViewModel : ViewModel() {
             }
     }
 
+    // Make getPhotoUrlFlow accept the current storage file list so UI reacts to deletions/uploads immediately
     fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
         val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
 
-        // Emit default immediately to avoid empty/grey circle
+        // Emit default immediately to avoid grey circle
         trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val url = snapshot.getValue(String::class.java)
-                val safeUrl = if (!url.isNullOrBlank()) url else DEFAULT_CHILD_PHOTO_URL
-                trySend(safeUrl).isSuccess
+                val dbUrl = snapshot.getValue(String::class.java).orEmpty()
+
+                // If DB has no URL, immediately send default
+                if (dbUrl.isBlank()) {
+                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                    return
+                }
+
+                // Try to resolve the Storage reference from the DB URL and verify it exists.
+                try {
+                    val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
+                    val storageRef = try {
+                        storage.getReferenceFromUrl(dbUrl)
+                    } catch (e: Exception) {
+                        null
+                    }
+
+                    if (storageRef == null) {
+                        // URL wasn't a valid storage URL — switch to default and correct DB
+                        trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                        database.child("children").child(normalizedKey).child("photoUrl")
+                            .setValue(DEFAULT_CHILD_PHOTO_URL)
+                        return
+                    }
+
+                    // Check metadata to ensure the file still exists in Storage
+                    storageRef.metadata
+                        .addOnSuccessListener {
+                            // File exists — emit the original DB URL (so Coil can load it)
+                            trySend(dbUrl).isSuccess
+                        }
+                        .addOnFailureListener { _ ->
+                            // File missing or inaccessible — set DB to default and emit default
+                            trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                            database.child("children").child(normalizedKey).child("photoUrl")
+                                .setValue(DEFAULT_CHILD_PHOTO_URL)
+                        }
+                } catch (e: Exception) {
+                    // Any unexpected failure -> fall back to default
+                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                }
             }
 
             override fun onCancelled(error: DatabaseError) {
