@@ -460,37 +460,17 @@ class ParentDashboardViewModel : ViewModel() {
             }
     }
 
-    fun getPhotoUrlFlow(childName: String, storageFiles: List<String>) = callbackFlow<String> {
+    fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
         val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
 
+        // Emit default immediately to avoid empty/grey circle
+        trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val url = snapshot.getValue(String::class.java).orEmpty()
-
-                // Check if DB photo actually belongs to this child
-                val belongsToChild = url.contains(normalizedKey, ignoreCase = true)
-
-                // Also look in Storage for an exact match
-                val normalizedFiles = storageFiles.associateBy {
-                    it.substringBeforeLast(".")
-                        .substringAfterLast("/")               // remove folder path
-                        .lowercase()                           // standardize case
-                        .replace(Regex("[^a-z0-9]"), "_")      // normalize symbols/spaces
-                }
-                val matchedFile = normalizedFiles[normalizedKey]
-
-                val safeUrl = when {
-                    url.isBlank() || !belongsToChild -> {
-                        matchedFile?.let {
-                            // include the Children Images folder path so the public URL actually points to the file
-                            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$it?alt=media"
-                        } ?: DEFAULT_CHILD_PHOTO_URL
-                    }
-
-                    else -> url
-                }
-
+                val url = snapshot.getValue(String::class.java)
+                val safeUrl = if (!url.isNullOrBlank()) url else DEFAULT_CHILD_PHOTO_URL
                 trySend(safeUrl).isSuccess
             }
 
@@ -502,6 +482,7 @@ class ParentDashboardViewModel : ViewModel() {
         dbRef.addValueEventListener(listener)
         awaitClose { dbRef.removeEventListener(listener) }
     }.distinctUntilChanged()
+
     // Fetch all image filenames from Firebase Storage, then repair photoUrl links
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
         Log.d("ParentDashboard", "✅ Listed ${storageFiles.size} files from Storage")

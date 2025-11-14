@@ -248,14 +248,12 @@ class SignUpViewModel : ViewModel() {
                             return dp[lhs.length][rhs.length]
                         }
 
-                        val bestMatch = imageBaseNames.keys.minByOrNull { levenshtein(it, sanitizedChildName) }
-
                         val chosenBase = imageBaseNames.keys.find { key ->
                             key.contains(sanitizedChildName, ignoreCase = true) ||
-                                    sanitizedChildName.contains(key, ignoreCase = true)
-                        } ?: bestMatch
+                                    sanitizedChildName.contains(key, ignoreCase = true) ||
+                                    key.toCharArray().sorted().joinToString("") == sanitizedChildName.toCharArray().sorted().joinToString("")
+                        }
 
-                        // If we matched a child image in "Children Images" use it, otherwise point to the explicit Default Image folder fallback.
                         val finalFileName = if (chosenBase != null) imageBaseNames[chosenBase] else null
 
                         val imageRef = if (finalFileName != null) {
