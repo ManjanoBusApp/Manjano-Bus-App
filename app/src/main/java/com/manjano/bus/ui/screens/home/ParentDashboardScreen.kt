@@ -52,7 +52,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
 import coil.request.ImageRequest
 import androidx.compose.ui.platform.LocalContext
-
+import androidx.compose.ui.graphics.painter.ColorPainter
 
 data class Child(
     val name: String = "",
@@ -62,8 +62,8 @@ data class Child(
     val active: Boolean = true
 )
 
-private val defaultPhotoUrl = "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2Fdefault_child.jpg.png?alt=media&token=6fd620f5-f8e5-4fe6-9a0d-cb5c43b912d0"
-
+private val defaultPhotoUrl =
+    "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2Fa.png?alt=media&token=872fbf13-7827-4c3e-9657-b428545ccca4"
 
 @Composable
 fun ParentDashboardScreen(
@@ -102,6 +102,22 @@ fun ParentDashboardScreen(
     val childExpanded = remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    var storageFiles by remember { mutableStateOf<List<String>>(emptyList()) }
+
+    LaunchedEffect(Unit) {
+        val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
+        storage.listAll().addOnSuccessListener { listResult ->
+            storageFiles = listResult.items.map { it.name }
+            Log.d("ParentDashboard", "✅ Listed ${storageFiles.size} files from Storage")
+
+            // 🧩 Fix photo links in Realtime Database
+            viewModel.fetchAndRepairChildImages(storageFiles)
+        }.addOnFailureListener {
+            Log.e("ParentDashboard", "❌ Failed to list files from Storage", it)
+        }
+    }
+
+
 
     val configuration = LocalConfiguration.current
     val screenWidthDp = configuration.screenWidthDp.dp
@@ -215,18 +231,29 @@ fun ParentDashboardScreen(
                             }
                         }
 
-                        // NEW: Collect photoUrl for each child into the local map
+                        // Collect photoUrl for each child into the local map (use default if missing)
+                        // ✅ Collect photoUrl for each child with strict matching and safe default fallback
                         scope.launch {
-                            viewModel.getPhotoUrlFlow(key).collect { url ->
-                                // ignore placeholder/error states from ViewModel
-                                if (!url.isNullOrBlank() && url != "Error loading photo") {
-                                    childrenPhotoMap[key] = url
-                                    Log.d("🖼️ childrenPhotoMap", "Updated $key -> $url")
+                            viewModel.getPhotoUrlFlow(key, storageFiles).collect { url ->
+                                val normalizedKey = key.trim().lowercase().replace(Regex("[^a-z0-9]"), "")
+                                val isValidPhoto = !url.isNullOrBlank() &&
+                                        !url.contains("default_child", ignoreCase = true) &&
+                                        url != "Error loading photo" &&
+                                        url.contains("Children%20Images", ignoreCase = true)
 
-                                    // If this key is currently selected, update the selectedChild's photo immediately
-                                    val currentlySelectedKey = selectedChild.value.name.trim().lowercase()
-                                    if (currentlySelectedKey == key) {
-                                        selectedChild.value = selectedChild.value.copy(photoUrl = url)
+                                val safeUrl = if (isValidPhoto) {
+                                    url
+                                } else {
+                                    defaultPhotoUrl
+                                }
+
+                                if (childrenPhotoMap[key] != safeUrl) {
+                                    childrenPhotoMap[key] = safeUrl
+                                    Log.d("🖼️ childrenPhotoMap", "Updated $key -> $safeUrl (valid=$isValidPhoto)")
+
+                                    val selectedKey = selectedChild.value.name.trim().lowercase()
+                                    if (selectedKey == key) {
+                                        selectedChild.value = selectedChild.value.copy(photoUrl = safeUrl)
                                     }
                                 }
                             }
@@ -325,10 +352,33 @@ fun ParentDashboardScreen(
 
                     // --- PHOTO URL FLOW (NEW) ---
                     launch {
-                        viewModel.getPhotoUrlFlow(selectedChild.value.name)
+                        viewModel.getPhotoUrlFlow(selectedChild.value.name, storageFiles)
                             .collectLatest { url ->
-                                if (url.isNotBlank() && url != "Error loading photo") {
-                                    selectedChild.value = selectedChild.value.copy(photoUrl = url)
+                                // Normalize the selected child name
+                                val normalizedKey = selectedChild.value.name.trim()
+                                    .replace(" ", "")
+                                    .replace("_", "")
+                                    .replace("-", "")
+                                    .lowercase()
+
+                                // Confirm this photo truly belongs to the child
+                                val belongsToChild = url.contains(normalizedKey, ignoreCase = true)
+
+                                // Enforce safe default rules
+                                val safeUrl = if (
+                                    url.isNullOrBlank() ||
+                                    url == "Error loading photo" ||
+                                    url.contains("default_child", ignoreCase = true) ||
+                                    !belongsToChild
+                                ) {
+                                    defaultPhotoUrl
+                                } else {
+                                    url
+                                }
+
+                                if (selectedChild.value.photoUrl != safeUrl) {
+                                    selectedChild.value = selectedChild.value.copy(photoUrl = safeUrl)
+                                    Log.d("🖼️ SelectedChild", "Updated ${selectedChild.value.name} -> $safeUrl (belongs=$belongsToChild)")
                                 }
                             }
                     }
@@ -340,11 +390,11 @@ fun ParentDashboardScreen(
                     painter = rememberAsyncImagePainter(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(selectedChild.value.photoUrl.ifBlank { defaultPhotoUrl })
-                            .crossfade(true) // smooth transition
-                            .memoryCacheKey(selectedChild.value.name) // keeps images cached by child name
+                            .crossfade(true)
+                            .memoryCacheKey(selectedChild.value.name)
                             .build(),
-                        placeholder = painterResource(R.drawable.default_child),
-                        error = painterResource(R.drawable.default_child)
+                        placeholder = ColorPainter(Color.LightGray), // plain gray placeholder
+                        error = ColorPainter(Color.Gray)             // plain gray if loading fails
                     ),
                     contentDescription = "Child photo for ${selectedChild.value.name}",
                     modifier = Modifier
@@ -354,7 +404,6 @@ fun ParentDashboardScreen(
                         .clip(CircleShape),
                     contentScale = ContentScale.Fit
                 )
-
 
                 Text(
                     text = etaText,

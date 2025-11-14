@@ -7,12 +7,15 @@ import com.google.firebase.database.*
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class ParentDashboardViewModel : ViewModel() {
 
     private val database =
         FirebaseDatabase.getInstance("https://manjano-bus-default-rtdb.firebaseio.com/")
             .reference
+
     // real-time children list (paste inside ParentDashboardViewModel, after `database`)
     private val _childrenKeys = MutableStateFlow<List<String>>(emptyList())
     val childrenKeys: StateFlow<List<String>> = _childrenKeys
@@ -43,7 +46,8 @@ class ParentDashboardViewModel : ViewModel() {
             }
         }
 
-        override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) { /* ignore */ }
+        override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) { /* ignore */
+        }
 
         override fun onCancelled(error: DatabaseError) {
             Log.e("🔥", "childrenEventListener cancelled: ${error.message}")
@@ -59,7 +63,11 @@ class ParentDashboardViewModel : ViewModel() {
         fixMismatchedDisplayNames()
     }
 
-    /** Create child node ONLY if it doesn't exist; do NOT overwrite existing ETA */
+     /** Create child node ONLY if it doesn't exist; do NOT overwrite existing ETA.
+     *  Important: at creation time we explicitly set photoUrl → DEFAULT_CHILD_PHOTO_URL
+     *  to avoid any incorrect inference. Matching against Storage should happen
+     *  separately when a verified list of storage filenames/URLs is available.
+     */
     private fun createChildIfMissing(childKey: String, displayName: String) {
         val ref = database.child("children").child(childKey)
         ref.get().addOnSuccessListener { snapshot ->
@@ -69,22 +77,26 @@ class ParentDashboardViewModel : ViewModel() {
                     "displayName" to displayName,
                     "eta" to "Arriving in 5 minutes", // only used for new nodes
                     "status" to "On Route",
-                    "messages" to emptyMap<String, Any>()
+                    "messages" to emptyMap<String, Any>(),
+                    // Ensure new nodes always get the canonical default photo url.
+                    "photoUrl" to DEFAULT_CHILD_PHOTO_URL
                 )
                 ref.updateChildren(defaultData)
                     .addOnSuccessListener {
-                        Log.d("🔥", "✅ Child '$childKey' created successfully")
+                        Log.d("🔥", "✅ Child '$childKey' created successfully (photoUrl set to default)")
                     }
                     .addOnFailureListener { e ->
                         Log.e("🔥", "❌ Failed to create child '$childKey': ${e.message}")
                     }
             } else {
                 Log.d("🔥", "✅ Child '$childKey' already exists — no overwrite")
-                // Only fill missing fields if necessary, without touching 'eta'
+                // Only fill missing fields if necessary, without touching 'eta' or existing photoUrl.
                 val updates = mutableMapOf<String, Any>()
                 if (!snapshot.hasChild("displayName")) updates["displayName"] = displayName
                 if (!snapshot.hasChild("status")) updates["status"] = "On Route"
                 if (!snapshot.hasChild("messages")) updates["messages"] = emptyMap<String, Any>()
+                // If photoUrl is missing, set to default (but do NOT overwrite an existing photoUrl)
+                if (!snapshot.hasChild("photoUrl")) updates["photoUrl"] = DEFAULT_CHILD_PHOTO_URL
 
                 if (updates.isNotEmpty()) {
                     Log.d("🔥", "🩹 Filling missing fields for '$childKey': $updates")
@@ -337,33 +349,161 @@ class ParentDashboardViewModel : ViewModel() {
                 Log.e("🔥", "❌ Failed to send message: ${e.message}")
             }
     }
-    fun getPhotoUrlFlow(childName: String): StateFlow<String> {
-        val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-        Log.d("🔥", "🔍 Observing photoUrl for '$key' (original: $childName)")
 
-        val photoFlow = MutableStateFlow("https://firebasestorage.googleapis.com/v0/b/manjano-bus.appspot.com/o/default_child.jpg?alt=media")
-        val ref = database.child("children").child(key).child("photoUrl")
-        val listener = object : ValueEventListener {
-            override fun onDataChange(snapshot: DataSnapshot) {
-                val url = snapshot.getValue(String::class.java) ?: photoFlow.value
-                if (photoFlow.value != url) {
-                    Log.d("🔥", "✅ Photo URL update from Firebase: '$url'")
-                    photoFlow.value = url
-                }
-            }
+    /** Calculate Levenshtein distance between two strings */
+    private fun levenshteinDistance(lhs: String, rhs: String): Int {
+        val lhsLength = lhs.length
+        val rhsLength = rhs.length
 
-            override fun onCancelled(error: DatabaseError) {
-                if (photoFlow.value != "Error loading photo") {
-                    Log.e("🔥", "❌ Failed to fetch photoUrl: ${error.message}")
-                    photoFlow.value = "Error loading photo"
-                }
+        val dp = Array(lhsLength + 1) { IntArray(rhsLength + 1) }
+
+        for (i in 0..lhsLength) dp[i][0] = i
+        for (j in 0..rhsLength) dp[0][j] = j
+
+        for (i in 1..lhsLength) {
+            for (j in 1..rhsLength) {
+                val cost = if (lhs[i - 1] == rhs[j - 1]) 0 else 1
+                dp[i][j] = minOf(
+                    dp[i - 1][j] + 1,      // deletion
+                    dp[i][j - 1] + 1,      // insertion
+                    dp[i - 1][j - 1] + cost // substitution
+                )
             }
         }
 
-        ref.addValueEventListener(listener)
-        addCloseableListener(ref, listener)
+        return dp[lhsLength][rhsLength]
+    }
 
-        return photoFlow
+    companion object {
+        private const val DEFAULT_CHILD_PHOTO_URL =
+            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2Fa.png?alt=media&token=872fbf13-7827-4c3e-9657-b428545ccca4"
+    }
+
+
+    /** Assign each child's photo strictly by exact match; fallback to default if none found */
+    private fun saveChildImage(childKey: String, displayName: String, storageFiles: List<String>) {
+        val normalizedChild = childKey.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+
+        // ✅ Create a map of exact normalized file names
+        val normalizedFiles = storageFiles.associateBy {
+            it.substringBeforeLast(".")
+                .substringAfterLast("/")               // remove folder path
+                .lowercase()                           // standardize case
+                .replace(Regex("[^a-z0-9]"), "_")      // normalize symbols/spaces
+        }
+
+        // ✅ Exact lookup only — get the file that exactly matches this child
+        val matchedFile = normalizedFiles[normalizedChild]
+
+        // ✅ Only use exact match; no partial or substring matching
+        val finalUrl = if (matchedFile == null) {
+            DEFAULT_CHILD_PHOTO_URL
+        } else {
+            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
+        }
+
+        Log.d("🔥", "✅ Saved '$childKey' → ${if (matchedFile == null) "a.png" else matchedFile}")
+
+        database.child("children").child(normalizedChild).child("photoUrl")
+            .setValue(finalUrl)
+            .addOnSuccessListener {
+                Log.d("🔥", "✅ Photo URL saved for '$childKey'")
+            }
+            .addOnFailureListener { e ->
+                Log.e("🔥", "❌ Failed to save photo URL for '$childKey': ${e.message}")
+            }
+    }
+
+    /** Step 2: Scan all children and repair photoUrl links using verified storage files */
+    fun repairAllChildImages(storageFiles: List<String>) {
+        val normalizedFiles = storageFiles.associateBy {
+            it.substringBeforeLast(".")
+                .substringAfterLast("/")               // remove folder path
+                .lowercase()                           // standardize case
+                .replace(Regex("[^a-z0-9]"), "_")      // normalize symbols/spaces
+        }
+
+        database.child("children").get()
+            .addOnSuccessListener { snapshot ->
+                if (snapshot.exists()) {
+                    snapshot.children.forEach { childSnap ->
+                        val displayName = childSnap.child("displayName").getValue(String::class.java) ?: return@forEach
+                        val normalizedKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+
+                        val matchedFile = normalizedFiles[normalizedKey]
+                        val currentUrl = childSnap.child("photoUrl").getValue(String::class.java)
+
+                        if (matchedFile != null) {
+                            val verifiedUrl =
+                                "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/$matchedFile?alt=media"
+                            if (currentUrl != verifiedUrl) {
+                                database.child("children").child(normalizedKey).child("photoUrl").setValue(verifiedUrl)
+                                Log.d("🧩 repairAllChildImages", "✅ Updated $displayName → $verifiedUrl")
+                            }
+                        } else {
+                            // no matching image file found — ensure default is set
+                            if (currentUrl.isNullOrBlank() || !currentUrl.contains("default_child", true)) {
+                                database.child("children").child(normalizedKey).child("photoUrl")
+                                    .setValue(DEFAULT_CHILD_PHOTO_URL)
+                                Log.d("🧩 repairAllChildImages", "🩹 Set $displayName → DEFAULT")
+                            }
+                        }
+                    }
+                } else {
+                    Log.w("🧩 repairAllChildImages", "⚠️ No children found in database.")
+                }
+            }
+            .addOnFailureListener { e ->
+                Log.e("🧩 repairAllChildImages", "❌ Failed to read children: ${e.message}")
+            }
+    }
+
+    fun getPhotoUrlFlow(childName: String, storageFiles: List<String>) = callbackFlow<String> {
+        val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+        val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
+
+        val listener = object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val url = snapshot.getValue(String::class.java).orEmpty()
+
+                // Check if DB photo actually belongs to this child
+                val belongsToChild = url.contains(normalizedKey, ignoreCase = true)
+
+                // Also look in Storage for an exact match
+                val normalizedFiles = storageFiles.associateBy {
+                    it.substringBeforeLast(".")
+                        .substringAfterLast("/")               // remove folder path
+                        .lowercase()                           // standardize case
+                        .replace(Regex("[^a-z0-9]"), "_")      // normalize symbols/spaces
+                }
+                val matchedFile = normalizedFiles[normalizedKey]
+
+                val safeUrl = when {
+                    url.isBlank() || !belongsToChild -> {
+                        matchedFile?.let {
+                            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/$it?alt=media"
+                        } ?: DEFAULT_CHILD_PHOTO_URL
+                    }
+
+                    else -> url
+                }
+
+                trySend(safeUrl).isSuccess
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+            }
+        }
+
+        dbRef.addValueEventListener(listener)
+        awaitClose { dbRef.removeEventListener(listener) }
+    }.distinctUntilChanged()
+    // Fetch all image filenames from Firebase Storage, then repair photoUrl links
+    fun fetchAndRepairChildImages(storageFiles: List<String>) {
+        Log.d("ParentDashboard", "✅ Listed ${storageFiles.size} files from Storage")
+        viewModelScope.launch {
+            repairAllChildImages(storageFiles)
+        }
     }
 }
-
