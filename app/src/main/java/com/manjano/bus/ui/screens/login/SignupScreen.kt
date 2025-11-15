@@ -1,30 +1,68 @@
 package com.manjano.bus.ui.screens.login
 
+import android.content.Context
+import android.util.Log
 import android.util.Patterns
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Snackbar
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -36,27 +74,80 @@ import com.manjano.bus.utils.PhoneNumberUtils
 import com.manjano.bus.viewmodel.SignUpViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import androidx.compose.ui.platform.SoftwareKeyboardController
-import androidx.compose.ui.focus.FocusManager
-import androidx.compose.ui.focus.FocusDirection
-import androidx.compose.foundation.layout.imePadding
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import androidx.compose.ui.text.TextRange
-import androidx.compose.foundation.layout.systemBarsPadding
-import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.ui.text.style.TextDecoration
-import androidx.compose.foundation.clickable
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import kotlin.ranges.coerceIn
-import androidx.compose.ui.focus.onFocusChanged
-import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.ui.platform.LocalFocusManager
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import android.content.Context
-import android.content.SharedPreferences
-import android.util.Log
+
+@Composable
+fun SignupOtpInputRow(
+    otp: List<String>,
+    otpErrorMessage: String? = null,
+    shouldShakeOtp: Boolean = false,
+    onOtpChange: (List<String>) -> Unit,
+    keyboardController: SoftwareKeyboardController?,
+    focusManager: FocusManager,
+    onClearError: () -> Unit,
+    onAutoVerify: () -> Unit,
+    isSending: Boolean = false,
+    focusRequester: FocusRequester
+) {
+    val safeOtp =
+        if (otp.size == Constants.OTP_LENGTH) otp else List(Constants.OTP_LENGTH) { "" }
+    val scope = rememberCoroutineScope()
+    val offsetX by animateDpAsState(
+        targetValue = if (shouldShakeOtp) 8.dp else 0.dp
+    )
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(
+                8.dp,
+                Alignment.CenterHorizontally
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 12.dp)
+                .offset(x = offsetX)
+        ) {
+            safeOtp.forEachIndexed { index, digit ->
+                OutlinedTextField(
+                    value = digit,
+                    onValueChange = { newValue ->
+                        if (newValue.length <= 1 && newValue.all { ch -> ch.isDigit() }) {
+                            val newOtp = safeOtp.toMutableList()
+                            newOtp[index] = newValue
+                            onOtpChange(newOtp)
+
+                            if (newValue.isNotEmpty() && index < Constants.OTP_LENGTH - 1) {
+                                focusManager.moveFocus(FocusDirection.Next)
+                            }
+
+                            if (newValue.isNotEmpty() && index == Constants.OTP_LENGTH - 1) {
+                                // Small delay to ensure the digit is processed before hiding keyboard
+                                scope.launch {
+                                    delay(50) // Brief delay
+                                    keyboardController?.hide()
+                                }
+                            }
+                        }
+                    },
+
+                    singleLine = true,
+                    textStyle = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
+                    modifier = Modifier
+                        .size(50.dp)
+                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Number,
+                        imeAction = if (index == Constants.OTP_LENGTH - 1) ImeAction.Done else ImeAction.Next
+                    )
+                )
+            }
+        }
+    }
+}
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -178,104 +269,97 @@ fun SignupScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
 
-// ==================== DYNAMIC MULTI-CHILD SECTION (TIGHT SPACING) ====================
+// ==================== DYNAMIC MULTI-CHILD SECTION (FINAL COMPACT VERSION) ====================
         var childrenNames by remember { mutableStateOf(listOf(TextFieldValue(""))) }
         var childErrors by remember { mutableStateOf(listOf(false)) }
 
-// Add new child field - ULTRA SAFE
+// Add new child
         val addChild = {
-            val currentChildrenSize = childrenNames.size
-            val currentErrorsSize = childErrors.size
-
-            // Ensure lists are same length
-            if (currentChildrenSize == currentErrorsSize) {
-            }
-
-            // Create new lists
-            val newChildren = childrenNames.toMutableList().apply {
-                add(TextFieldValue(""))
-            }
-            val newErrors = childErrors.toMutableList().apply {
-                add(false)
-            }
-
-            // Update states
+            val newChildren = childrenNames.toMutableList().apply { add(TextFieldValue("")) }
+            val newErrors = childErrors.toMutableList().apply { add(false) }
             childrenNames = newChildren
             childErrors = newErrors
         }
 
-// Remove child field
+// Remove child
         val removeChild = { index: Int ->
-            if (childrenNames.size > 1) { // Always keep at least 1 child
+            if (childrenNames.size > 1) {
                 childrenNames = childrenNames.filterIndexed { i, _ -> i != index }
                 childErrors = childErrors.filterIndexed { i, _ -> i != index }
             }
         }
 
-        // Column for all child fields
+// Column for all child fields
         Column {
             childrenNames.forEachIndexed { index, childName ->
-                Column {
-                    // ROW 1: Child Name + Add Button (only on last child)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Child Name TextField (takes most space)
-                        OutlinedTextField(
-                            value = childName,
-                            onValueChange = { newValue ->
-                                val filtered = newValue.text.filter { ch -> ch.isLetter() || ch.isWhitespace() }
-                                val updatedChildren = childrenNames.toMutableList()
-                                updatedChildren[index] = TextFieldValue(
-                                    text = filtered,
-                                    selection = TextRange(
-                                        start = newValue.selection.start.coerceIn(0, filtered.length),
-                                        end = newValue.selection.end.coerceIn(0, filtered.length)
-                                    )
+                Column(
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    // Child Name TextField
+                    OutlinedTextField(
+                        value = childName,
+                        onValueChange = { newValue ->
+                            val filtered =
+                                newValue.text.filter { it.isLetter() || it.isWhitespace() }
+                            val updatedChildren = childrenNames.toMutableList()
+                            updatedChildren[index] = TextFieldValue(
+                                text = filtered,
+                                selection = TextRange(
+                                    start = newValue.selection.start.coerceIn(0, filtered.length),
+                                    end = newValue.selection.end.coerceIn(0, filtered.length)
                                 )
-                                childrenNames = updatedChildren
-                            },
-                            placeholder = {
-                                Text("Child ${index + 1}'s Full Name")
-                            },
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Text,
-                                capitalization = KeyboardCapitalization.Words
-                            ),
-                            singleLine = true,
-                            modifier = Modifier
-                                .weight(1f)
-                                .focusRequester(remember { FocusRequester() })
-                                .onFocusChanged { focusState ->
-                            if (focusState.isFocused) {
-                                val updatedErrors = childErrors.toMutableList()
-                                updatedErrors[index] = false
-                                childErrors = updatedErrors
-                            }
+                            )
+                            childrenNames = updatedChildren
                         },
-                            textStyle = TextStyle(fontSize = 16.sp),
-                            shape = RoundedCornerShape(12.dp),
-                            isError = childErrors[index]
-                        )
+                        placeholder = { Text("Child 'First.Middle.Last' Name") },
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Text,
+                            capitalization = KeyboardCapitalization.Words
+                        ),
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth() // full width
+                            .focusRequester(remember { FocusRequester() })
+                            .onFocusChanged { focusState ->
+                                if (focusState.isFocused) {
+                                    val updatedErrors = childErrors.toMutableList()
+                                    updatedErrors[index] = false
+                                    childErrors = updatedErrors
+                                }
+                            },
+                        textStyle = TextStyle(fontSize = 16.sp),
+                        shape = RoundedCornerShape(12.dp),
+                        isError = childErrors[index]
+                    )
 
-                        // Add Another Child Button (only on LAST child)
-                        if (index == childrenNames.lastIndex) {
-                            Spacer(modifier = Modifier.width(8.dp))
+                    // Error message
+                    if (childErrors[index]) {
+                        Text(
+                            "Please fill child's name",
+                            color = Color.Red,
+                            fontSize = 12.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp)
+                        )
+                    }
+
+                    // "+ Add" button below, aligned to end
+                    if (index == childrenNames.lastIndex) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 2.dp, bottom = 0.dp),
+                            horizontalArrangement = Arrangement.End
+                        ) {
                             TextButton(
                                 onClick = addChild,
-                                modifier = Modifier
-                                    .height(56.dp)
-                                    .padding(start = 4.dp),
-                                colors = ButtonDefaults.textButtonColors(
-                                    contentColor = Color.Black
-                                ),
+                                modifier = Modifier.height(40.dp),
+                                colors = ButtonDefaults.textButtonColors(contentColor = Color.Black),
                                 shape = RoundedCornerShape(12.dp)
                             ) {
                                 Text(
-                                    text = "+ Add",
+                                    text = "+ Add Another Child",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = Color.Black
@@ -284,19 +368,7 @@ fun SignupScreen(
                         }
                     }
 
-                    // ERROR MESSAGE - RIGHT UNDER TEXT BOX, FULL WIDTH!
-                    if (childErrors[index]) {
-                        Text(
-                            "Please fill child's name",
-                            color = Color.Red,
-                            fontSize = 12.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 0.dp, top = 0.dp) // FULL WIDTH, NO INDENT!
-                        )
-                    }
-
-                    // ROW 2: REMOVE BUTTON (indented)
+                    // Remove button below (indented)
                     if (childrenNames.size > 1) {
                         Row(
                             modifier = Modifier
@@ -310,7 +382,7 @@ fun SignupScreen(
                                 shape = RoundedCornerShape(8.dp)
                             ) {
                                 Text(
-                                    text = "- Remove",
+                                    text = "- Remove Child",
                                     fontSize = 14.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = Color.Red
@@ -318,14 +390,15 @@ fun SignupScreen(
                             }
                         }
                     }
-                }
 
-                // Spacer between child sections
-                if (index < childrenNames.lastIndex) {
-                    Spacer(modifier = Modifier.height(12.dp))
+                    // Spacer between child sections
+                    if (index < childrenNames.lastIndex) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                    }
                 }
             }
         }
+
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -334,7 +407,7 @@ fun SignupScreen(
             value = email,
             onValueChange = {
                 email = it
-                },
+            },
             placeholder = { Text("name@email.com") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
             singleLine = true,
@@ -422,11 +495,13 @@ fun SignupScreen(
                 parentError = parentName.text.isEmpty()
 
                 // Validate ALL children names - FORCE UPDATE childErrors!
-                childErrors = childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
+                childErrors =
+                    childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
                 val hasEmptyChild = childErrors.any { it }
                 studentError = hasEmptyChild
                 emailError =
-                    email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text).matches()
+                    email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
+                        .matches()
 
                 val isValidPhone = try {
                     PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
@@ -459,12 +534,13 @@ fun SignupScreen(
                                 }
                             }
                         }
+
                         emailError -> emailFocusRequester.requestFocus()
                         phoneError -> phoneFocusRequester.requestFocus()
                     }
                 }
             },
-         )
+        )
         ResendTimerSection(
             timer = uiState.resendTimerSeconds,
             canResend = uiState.canResendOtp,
@@ -506,7 +582,8 @@ fun SignupScreen(
                         showOtpErrorMessage = true // → New: Show invalid OTP message
                     }
                 } else {
-                    showOtpErrorMessage = false // → New: Hide invalid OTP message if not all digits entered
+                    showOtpErrorMessage =
+                        false // → New: Hide invalid OTP message if not all digits entered
                 }
             },
 
@@ -528,15 +605,29 @@ fun SignupScreen(
                 parentError = parentName.text.isEmpty()
                 // Validate ALL children names
                 val hasEmptyChild = childrenNames.any { it.text.isEmpty() }
-                childErrors = childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
+                childErrors =
+                    childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
                 studentError = hasEmptyChild
-                emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text).matches()
+                emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
+                    .matches()
                 phoneError = phoneNumber.isEmpty()
 
-                if (!parentError && !studentError && !emailError && !phoneError && uiState.otpDigits.joinToString("") == Constants.TEST_OTP) {
+                if (!parentError && !studentError && !emailError && !phoneError && uiState.otpDigits.joinToString(
+                        ""
+                    ) == Constants.TEST_OTP
+                ) {
                     // Save parent + children names
-                    Log.d("🔥", "SignupScreen: Calling saveUserNames with parentName=${parentName.text}, childrenNames=${childrenNames.joinToString(",") { it.text }}")
-                    signupViewModel.saveUserNames(parentName.text, childrenNames.joinToString(",") { it.text }, context)
+                    Log.d(
+                        "🔥",
+                        "SignupScreen: Calling saveUserNames with parentName=${parentName.text}, childrenNames=${
+                            childrenNames.joinToString(",") { it.text }
+                        }"
+                    )
+                    signupViewModel.saveUserNames(
+                        parentName.text,
+                        childrenNames.joinToString(",") { it.text },
+                        context
+                    )
                     // Save names to SharedPreferences for persistence across sessions
                     val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
                     prefs.edit().apply {
@@ -544,9 +635,14 @@ fun SignupScreen(
                         putString("children_names", childrenNames.joinToString(",") { it.text })
                     }.apply()
                     // Encode names so spaces/special chars don't break the route
-                    val encodedParent = URLEncoder.encode(parentName.text, StandardCharsets.UTF_8.toString())
-                    val encodedChildren = URLEncoder.encode(childrenNames.joinToString(",") { it.text }, StandardCharsets.UTF_8.toString())
-                    val encodedStatus = URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
+                    val encodedParent =
+                        URLEncoder.encode(parentName.text, StandardCharsets.UTF_8.toString())
+                    val encodedChildren = URLEncoder.encode(
+                        childrenNames.joinToString(",") { it.text },
+                        StandardCharsets.UTF_8.toString()
+                    )
+                    val encodedStatus =
+                        URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
                     navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
                         popUpTo("signup") { inclusive = true }
                     }
@@ -591,76 +687,7 @@ fun SignupScreen(
     }
 }
 
-        @Composable
-        fun SignupOtpInputRow(
-            otp: List<String>,
-            otpErrorMessage: String? = null,
-            shouldShakeOtp: Boolean = false,
-            onOtpChange: (List<String>) -> Unit,
-            keyboardController: SoftwareKeyboardController?,
-            focusManager: FocusManager,
-            onClearError: () -> Unit,
-            onAutoVerify: () -> Unit,
-            isSending: Boolean = false,
-            focusRequester: FocusRequester
-        ) {
-            val safeOtp =
-                if (otp.size == Constants.OTP_LENGTH) otp else List(Constants.OTP_LENGTH) { "" }
-            val scope = rememberCoroutineScope()
-            val offsetX by animateDpAsState(
-                targetValue = if (shouldShakeOtp) 8.dp else 0.dp
-            )
 
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(
-                        8.dp,
-                        Alignment.CenterHorizontally
-                    ),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 12.dp)
-                        .offset(x = offsetX)
-                ) {
-                    safeOtp.forEachIndexed { index, digit ->
-                        OutlinedTextField(
-                            value = digit,
-                            onValueChange = { newValue ->
-                                if (newValue.length <= 1 && newValue.all { ch -> ch.isDigit() }) {
-                                    val newOtp = safeOtp.toMutableList()
-                                    newOtp[index] = newValue
-                                    onOtpChange(newOtp)
 
-                                    if (newValue.isNotEmpty() && index < Constants.OTP_LENGTH - 1) {
-                                        focusManager.moveFocus(FocusDirection.Next)
-                                    }
-
-                                    if (newValue.isNotEmpty() && index == Constants.OTP_LENGTH - 1) {
-                                        // Small delay to ensure the digit is processed before hiding keyboard
-                                        scope.launch {
-                                            delay(50) // Brief delay
-                                            keyboardController?.hide()
-                                        }
-                                    }
-                                }
-                            },
-
-                            singleLine = true,
-                            textStyle = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
-                            modifier = Modifier
-                                .size(50.dp)
-                                .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
-                                keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                imeAction = if (index == Constants.OTP_LENGTH - 1) ImeAction.Done else ImeAction.Next
-                            )
-                        )
-                    }
-                }
-            }
-        }
 
 
