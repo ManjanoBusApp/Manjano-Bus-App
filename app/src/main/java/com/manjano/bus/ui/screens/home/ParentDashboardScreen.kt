@@ -1,24 +1,57 @@
 package com.manjano.bus.ui.screens.home
 
+import android.util.Log
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -29,30 +62,14 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
+import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
 import com.google.firebase.database.FirebaseDatabase
 import com.manjano.bus.R
-import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.runtime.snapshotFlow
-import kotlinx.coroutines.flow.collect
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Snackbar
-import androidx.compose.runtime.rememberCoroutineScope
-import android.util.Log
-import kotlinx.coroutines.launch
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.collectLatest
-import coil.compose.rememberAsyncImagePainter
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.draw.clip
-import coil.request.ImageRequest
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.graphics.painter.ColorPainter
+import kotlinx.coroutines.launch
 
 data class Child(
     val name: String = "",
@@ -105,7 +122,8 @@ fun ParentDashboardScreen(
     var storageFiles by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(Unit) {
-        val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
+        val storage =
+            com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
         storage.listAll().addOnSuccessListener { listResult ->
             storageFiles = listResult.items.map { it.name }
             Log.d("ParentDashboard", "✅ Listed ${storageFiles.size} files from Storage")
@@ -116,7 +134,6 @@ fun ParentDashboardScreen(
             Log.e("ParentDashboard", "❌ Failed to list files from Storage", it)
         }
     }
-
 
 
     val configuration = LocalConfiguration.current
@@ -225,7 +242,8 @@ fun ParentDashboardScreen(
                                     childrenDisplayMap[key] = displayName
                                     // If currently selected child matches this key, update its display name
                                     if (selectedChild.value.name.trim().lowercase() == key) {
-                                        selectedChild.value = selectedChild.value.copy(name = displayName)
+                                        selectedChild.value =
+                                            selectedChild.value.copy(name = displayName)
                                     }
                                 }
                             }
@@ -242,7 +260,8 @@ fun ParentDashboardScreen(
                                     val selectedKey = selectedChild.value.name.trim().lowercase()
                                     if (selectedKey == key) {
                                         // immediate UI update for selected child
-                                        selectedChild.value = selectedChild.value.copy(photoUrl = safeUrl)
+                                        selectedChild.value =
+                                            selectedChild.value.copy(photoUrl = safeUrl)
                                     }
                                 }
                             }
@@ -302,7 +321,8 @@ fun ParentDashboardScreen(
                                 },
                                 onClick = {
                                     // Grab latest photo URL from the live map, fallback to default
-                                    val url = childrenPhotoMap[key].takeIf { !it.isNullOrBlank() } ?: defaultPhotoUrl
+                                    val url = childrenPhotoMap[key].takeIf { !it.isNullOrBlank() }
+                                        ?: defaultPhotoUrl
 
                                     // Update selected child immediately with name + latest url (prevents flicker)
                                     selectedChild.value = selectedChild.value.copy(
@@ -346,8 +366,12 @@ fun ParentDashboardScreen(
                                 val safeUrl = url.ifBlank { defaultPhotoUrl }
 
                                 if (selectedChild.value.photoUrl != safeUrl) {
-                                    selectedChild.value = selectedChild.value.copy(photoUrl = safeUrl)
-                                    Log.d("🖼️ SelectedChild", "Updated ${selectedChild.value.name} -> $safeUrl")
+                                    selectedChild.value =
+                                        selectedChild.value.copy(photoUrl = safeUrl)
+                                    Log.d(
+                                        "🖼️ SelectedChild",
+                                        "Updated ${selectedChild.value.name} -> $safeUrl"
+                                    )
                                 }
                             }
                     }
@@ -428,12 +452,30 @@ fun ParentDashboardScreen(
                     }
                 }
 
-                // --- Quick Actions & Message Box ---
+                Spacer(modifier = Modifier.height(uiSizes.verticalSpacing))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(uiSizes.mapHeight)
+                        .background(Color(192, 192, 192))
+                        .semantics { contentDescription = "Bus location map placeholder" },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Map coming soon",
+                        color = Color.White,
+                        fontSize = if (uiSizes.isTablet) 18.sp else 16.sp,
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(8.dp)) // small gap from map
+
                 Box(
                     modifier = Modifier
                         .width(uiSizes.dropdownWidth)
                         .height(if (uiSizes.isTablet) 56.dp else 50.dp)
-                        .padding(top = if (uiSizes.isTablet) 6.dp else 4.dp)
+                        .align(Alignment.Start) // far left
                         .semantics {
                             contentDescription =
                                 "Select Contact Driver, Contact School, or Report Issue"
@@ -498,6 +540,7 @@ fun ParentDashboardScreen(
                     }
                 }
 
+                // --- Quick Actions & Message Box (moved here so it appears under the dropdown) ---
                 if (showTextBox.value) {
                     Column(
                         modifier = Modifier
@@ -530,10 +573,7 @@ fun ParentDashboardScreen(
                                                     this[i + 1] == ' ' &&
                                                     this[i + 2].isLowerCase()
                                                 ) {
-                                                    setCharAt(
-                                                        i + 2,
-                                                        this[i + 2].uppercaseChar()
-                                                    )
+                                                    setCharAt(i + 2, this[i + 2].uppercaseChar())
                                                 }
                                                 i++
                                             }
@@ -574,15 +614,11 @@ fun ParentDashboardScreen(
 
                             Button(
                                 onClick = {
-                                    if (textInput.value.isNotBlank() && !textInput.value.endsWith(
-                                            "."
-                                        )
-                                    ) {
+                                    if (textInput.value.isNotBlank() && !textInput.value.endsWith(".")) {
                                         textInput.value = textInput.value.trim() + "."
                                     }
                                     val normalizedKey =
-                                        selectedChild.value.name.trim().lowercase()
-                                            .replace(Regex("[^a-z0-9]"), "_")
+                                        selectedChild.value.name.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
                                     if (normalizedKey.isNotEmpty()) {
                                         database.child("children").child(normalizedKey)
                                             .child("messages").push().setValue(
@@ -600,11 +636,7 @@ fun ParentDashboardScreen(
                                     .width(if (uiSizes.isTablet) 100.dp else 80.dp)
                                     .height(if (uiSizes.isTablet) 36.dp else 28.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(
-                                        0xFF800080
-                                    )
-                                )
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF800080))
                             ) {
                                 Text(
                                     text = "Enter",
@@ -662,38 +694,10 @@ fun ParentDashboardScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(uiSizes.verticalSpacing))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(uiSizes.mapHeight)
-                        .background(Color(192, 192, 192))
-                        .semantics { contentDescription = "Bus location map placeholder" },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = "Map coming soon",
-                        color = Color.White,
-                        fontSize = if (uiSizes.isTablet) 18.sp else 16.sp,
-                        textAlign = TextAlign.Center
-                    )
-                }
+                // Add this inside the Column, immediately after the Box
+                Spacer(modifier = Modifier.height(if (uiSizes.isTablet) 200.dp else 150.dp))
 
-                Spacer(modifier = Modifier.height(if (uiSizes.isTablet) 100.dp else 84.dp))
             }
         }
     )
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
