@@ -75,6 +75,13 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onGloballyPositioned
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+
 
 data class Child(
     val name: String = "",
@@ -463,21 +470,25 @@ fun ParentDashboardScreen(
                 }
 
                 Spacer(modifier = Modifier.height(uiSizes.verticalSpacing))
-                Box(
+                val busLocation = remember { mutableStateOf(LatLng(-1.2921, 36.8219)) }
+
+                val cameraPositionState = rememberCameraPositionState {
+                    position = com.google.android.gms.maps.model.CameraPosition.fromLatLngZoom(busLocation.value, 15f)
+                }
+
+                GoogleMap(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(uiSizes.mapHeight)
-                        .background(Color(192, 192, 192))
-                        .semantics { contentDescription = "Bus location map placeholder" },
-                    contentAlignment = Alignment.Center
+                        .height(uiSizes.mapHeight),
+                    cameraPositionState = cameraPositionState
                 ) {
-                    Text(
-                        text = "Map coming soon",
-                        color = Color.White,
-                        fontSize = if (uiSizes.isTablet) 18.sp else 16.sp,
-                        textAlign = TextAlign.Center
+                    Marker(
+                        state = MarkerState(position = busLocation.value),
+                        title = "Bus",
+                        snippet = "Current Location"
                     )
                 }
+
 
                 Spacer(modifier = Modifier.height(8.dp)) // small gap from map
 
