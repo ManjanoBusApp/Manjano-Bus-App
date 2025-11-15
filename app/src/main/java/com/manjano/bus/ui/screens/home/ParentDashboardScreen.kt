@@ -618,7 +618,8 @@ fun ParentDashboardScreen(
                                         textInput.value = textInput.value.trim() + "."
                                     }
                                     val normalizedKey =
-                                        selectedChild.value.name.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                                        selectedChild.value.name.trim().lowercase()
+                                            .replace(Regex("[^a-z0-9]"), "_")
                                     if (normalizedKey.isNotEmpty()) {
                                         database.child("children").child(normalizedKey)
                                             .child("messages").push().setValue(
@@ -636,7 +637,11 @@ fun ParentDashboardScreen(
                                     .width(if (uiSizes.isTablet) 100.dp else 80.dp)
                                     .height(if (uiSizes.isTablet) 36.dp else 28.dp),
                                 shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF800080))
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = Color(
+                                        0xFF800080
+                                    )
+                                )
                             ) {
                                 Text(
                                     text = "Enter",
@@ -693,11 +698,8 @@ fun ParentDashboardScreen(
                         }
                     }
                 }
-
-                // Add this inside the Column, immediately after the Box
-                Spacer(modifier = Modifier.height(if (uiSizes.isTablet) 200.dp else 150.dp))
-
             }
         }
     )
 }
+
