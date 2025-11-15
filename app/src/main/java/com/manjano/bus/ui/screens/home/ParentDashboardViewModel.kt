@@ -10,7 +10,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.delay
-
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 class ParentDashboardViewModel : ViewModel() {
 
@@ -64,7 +66,26 @@ class ParentDashboardViewModel : ViewModel() {
     init {
         fixMismatchedDisplayNames()
     }
-
+    init {
+        viewModelScope.launch {
+            while (true) {
+                try {
+                    val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
+                    val listResult = suspendCancellableCoroutine { cont ->
+                        storage.listAll()
+                            .addOnSuccessListener { cont.resume(it) }
+                            .addOnFailureListener { cont.resumeWithException(it) }
+                    }
+                    val storageFiles = listResult.items.map { it.name }
+                    repairAllChildImages(storageFiles)
+                    Log.d("🔥", "Periodic storage check completed, files: ${storageFiles.size}")
+                } catch (e: Exception) {
+                    Log.e("🔥", "Periodic storage check failed: ${e.message}")
+                }
+                delay(10000) // every 10 seconds
+            }
+        }
+    }
      /** Create child node ONLY if it doesn't exist; do NOT overwrite existing ETA.
      *  Important: at creation time we explicitly set photoUrl → DEFAULT_CHILD_PHOTO_URL
      *  to avoid any incorrect inference. Matching against Storage should happen
@@ -438,15 +459,22 @@ class ParentDashboardViewModel : ViewModel() {
                         val matchedFile = normalizedFiles[normalizedKey]
                         val currentUrl = childSnap.child("photoUrl").getValue(String::class.java)
 
+                        Log.d("🧩 debug", "For child $displayName (key: $normalizedKey), matchedFile: $matchedFile, currentUrl: $currentUrl, all storageFiles: $storageFiles")
+
                         if (matchedFile != null) {
                             val verifiedUrl =
                                 "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
+                            Log.d("🧩 debug", "Matched file found, verifiedUrl: $verifiedUrl, is different from current? ${currentUrl != verifiedUrl}")
+
                             if (currentUrl != verifiedUrl) {
                                 database.child("children").child(normalizedKey).child("photoUrl").setValue(verifiedUrl)
                                 Log.d("🧩 repairAllChildImages", "✅ Updated $displayName → $verifiedUrl")
+                            } else {
+                                Log.d("🧩 debug", "No update needed, currentUrl already matches verifiedUrl")
                             }
 
                         } else {
+                            Log.d("🧩 debug", "No matched file, setting to default")
                             // no matching image file found — explicitly set the new default image
                             database.child("children").child(normalizedKey).child("photoUrl")
                                 .setValue(DEFAULT_CHILD_PHOTO_URL)
