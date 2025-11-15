@@ -70,6 +70,11 @@ import com.google.firebase.database.FirebaseDatabase
 import com.manjano.bus.R
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onGloballyPositioned
 
 data class Child(
     val name: String = "",
@@ -183,12 +188,17 @@ fun ParentDashboardScreen(
             }
         },
         content = { innerPadding ->
+
+            val scrollState = rememberScrollState()
+            val messageBoxOffsetY = remember { mutableStateOf(0) }
+            val density = LocalDensity.current
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
                     .padding(if (uiSizes.isTablet) 24.dp else 16.dp)
-                    .verticalScroll(rememberScrollState())
+                    .verticalScroll(scrollState)
                     .imePadding(),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
@@ -557,6 +567,11 @@ fun ParentDashboardScreen(
                                 .height(if (uiSizes.isTablet) 200.dp else 160.dp)
                                 .background(Color(0xFFF0F0F0), RoundedCornerShape(8.dp))
                                 .padding(8.dp)
+                                .onGloballyPositioned { coordinates ->
+                                    scope.launch {
+                                        scrollState.animateScrollTo(scrollState.maxValue)
+                                    }
+                                }
                         ) {
                             BasicTextField(
                                 value = textInput.value,
@@ -585,9 +600,7 @@ fun ParentDashboardScreen(
                                     .fillMaxWidth()
                                     .height(if (uiSizes.isTablet) 120.dp else 100.dp)
                                     .align(Alignment.TopStart)
-                                    .semantics {
-                                        contentDescription = "Message input, max 300 characters"
-                                    },
+                                    .semantics { contentDescription = "Message input, max 300 characters" },
                                 textStyle = TextStyle(
                                     color = Color.Black,
                                     fontSize = if (uiSizes.isTablet) 16.sp else 14.sp
@@ -638,9 +651,7 @@ fun ParentDashboardScreen(
                                     .height(if (uiSizes.isTablet) 36.dp else 28.dp),
                                 shape = RoundedCornerShape(8.dp),
                                 colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(
-                                        0xFF800080
-                                    )
+                                    containerColor = Color(0xFF800080)
                                 )
                             ) {
                                 Text(
