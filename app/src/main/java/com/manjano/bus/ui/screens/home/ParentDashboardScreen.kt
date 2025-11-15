@@ -338,15 +338,11 @@ fun ParentDashboardScreen(
                                 },
                                 onClick = {
                                     // Grab latest photo URL from the live map, fallback to default
-                                    val url = childrenPhotoMap[key].takeIf { !it.isNullOrBlank() }
-                                        ?: defaultPhotoUrl
-
-                                    // Update selected child immediately with name + latest url (prevents flicker)
+                                    val url = childrenPhotoMap[key]?.takeIf { it.isNotBlank() } ?: selectedChild.value.photoUrl
                                     selectedChild.value = selectedChild.value.copy(
                                         name = displayName,
                                         photoUrl = url
                                     )
-
                                     childExpanded.value = false
                                 }
                             )
@@ -382,7 +378,10 @@ fun ParentDashboardScreen(
                             .collectLatest { url ->
                                 val safeUrl = url.ifBlank { defaultPhotoUrl }
 
-                                if (selectedChild.value.photoUrl != safeUrl) {
+                                // Only update if the URL has actually changed and it's not the default flipping
+                                if (selectedChild.value.photoUrl != safeUrl &&
+                                    (safeUrl != defaultPhotoUrl || selectedChild.value.photoUrl == defaultPhotoUrl)
+                                ) {
                                     selectedChild.value =
                                         selectedChild.value.copy(photoUrl = safeUrl)
                                     Log.d(
@@ -402,12 +401,12 @@ fun ParentDashboardScreen(
                 val painter = rememberAsyncImagePainter(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(childPhotoUrl)
-                        .memoryCacheKey(childPhotoUrl)      // ← ensure Coil keys cache by exact URL
+                        .memoryCacheKey(childPhotoUrl) // stable key
                         .crossfade(true)
                         .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                         .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
-                        .build()
-                )
+                        .build(),
+                    )
 
                 Image(
                     painter = painter,
