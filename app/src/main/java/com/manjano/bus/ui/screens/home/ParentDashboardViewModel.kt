@@ -9,6 +9,8 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.delay
+
 
 class ParentDashboardViewModel : ViewModel() {
 
@@ -519,7 +521,36 @@ class ParentDashboardViewModel : ViewModel() {
         }
 
         dbRef.addValueEventListener(listener)
-        awaitClose { dbRef.removeEventListener(listener) }
+
+        // Add periodic check to re-validate metadata every 10 seconds
+        val job = viewModelScope.launch {
+            while (true) {
+                delay(10000) // Check every 10 seconds
+                dbRef.get().addOnSuccessListener { snapshot ->
+                    val currentDbUrl = snapshot.getValue(String::class.java).orEmpty()
+                    if (currentDbUrl.isNotBlank()) {
+                        try {
+                            val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
+                            val storageRef = storage.getReferenceFromUrl(currentDbUrl)
+                            storageRef.metadata
+                                .addOnFailureListener {
+                                    // If metadata fails (file deleted), update DB and emit default
+                                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                                    dbRef.setValue(DEFAULT_CHILD_PHOTO_URL)
+                                }
+                        } catch (e: Exception) {
+                            trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                            dbRef.setValue(DEFAULT_CHILD_PHOTO_URL)
+                        }
+                    }
+                }
+            }
+        }
+
+        awaitClose {
+            dbRef.removeEventListener(listener)
+            job.cancel()
+        }
     }.distinctUntilChanged()
 
     // Fetch all image filenames from Firebase Storage, then repair photoUrl links
