@@ -446,7 +446,7 @@ class ParentDashboardViewModel : ViewModel() {
             it.substringBeforeLast(".")
                 .substringAfterLast("/")               // remove folder path
                 .lowercase()                           // standardize case
-                .replace(Regex("[^a-z0-9]"), "_")      // normalize symbols/spaces
+                .replace(Regex("[^a-z0-9]"), "")      // remove symbols/spaces instead of replacing with "_"
         }
 
         database.child("children").get()
@@ -455,11 +455,12 @@ class ParentDashboardViewModel : ViewModel() {
                     snapshot.children.forEach { childSnap ->
                         val displayName = childSnap.child("displayName").getValue(String::class.java) ?: return@forEach
                         val normalizedKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                        val normalizedKeyForMatch = normalizedKey.replace("_", "")  // remove "_" for matching concatenated files
 
-                        val matchedFile = normalizedFiles[normalizedKey]
+                        val matchedFile = normalizedFiles[normalizedKeyForMatch]
                         val currentUrl = childSnap.child("photoUrl").getValue(String::class.java)
 
-                        Log.d("🧩 debug", "For child $displayName (key: $normalizedKey), matchedFile: $matchedFile, currentUrl: $currentUrl, all storageFiles: $storageFiles")
+                        Log.d("🧩 debug", "For child $displayName (key: $normalizedKey, matchKey: $normalizedKeyForMatch), matchedFile: $matchedFile, currentUrl: $currentUrl, all storageFiles: $storageFiles")
 
                         if (matchedFile != null) {
                             val verifiedUrl =
@@ -490,13 +491,11 @@ class ParentDashboardViewModel : ViewModel() {
             }
     }
 
+
     // Make getPhotoUrlFlow accept the current storage file list so UI reacts to deletions/uploads immediately
     fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
         val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
-
-        // Emit default immediately to avoid grey circle
-        trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
@@ -508,7 +507,9 @@ class ParentDashboardViewModel : ViewModel() {
                     return
                 }
 
-                // Try to resolve the Storage reference from the DB URL and verify it exists.
+                trySend(dbUrl).isSuccess  // Emit the DB URL first to load the real image immediately
+
+                // Then verify in the background
                 try {
                     val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
                     val storageRef = try {
@@ -528,8 +529,7 @@ class ParentDashboardViewModel : ViewModel() {
                     // Check metadata to ensure the file still exists in Storage
                     storageRef.metadata
                         .addOnSuccessListener {
-                            // File exists — emit the original DB URL (so Coil can load it)
-                            trySend(dbUrl).isSuccess
+                            // File exists — no need to emit again
                         }
                         .addOnFailureListener { _ ->
                             // File missing or inaccessible — set DB to default and emit default
@@ -580,6 +580,7 @@ class ParentDashboardViewModel : ViewModel() {
             job.cancel()
         }
     }.distinctUntilChanged()
+
 
     // Fetch all image filenames from Firebase Storage, then repair photoUrl links
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
