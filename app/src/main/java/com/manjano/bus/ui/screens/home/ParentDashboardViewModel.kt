@@ -13,6 +13,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.tasks.await
 
 class ParentDashboardViewModel : ViewModel() {
 
@@ -500,47 +501,13 @@ class ParentDashboardViewModel : ViewModel() {
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val dbUrl = snapshot.getValue(String::class.java).orEmpty()
-
-                // If DB has no URL, immediately send default
                 if (dbUrl.isBlank()) {
+                    // Only emit default if DB is truly empty
                     trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
                     return
                 }
-
-                trySend(dbUrl).isSuccess  // Emit the DB URL first to load the real image immediately
-
-                // Then verify in the background
-                try {
-                    val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
-                    val storageRef = try {
-                        storage.getReferenceFromUrl(dbUrl)
-                    } catch (e: Exception) {
-                        null
-                    }
-
-                    if (storageRef == null) {
-                        // URL wasn't a valid storage URL — switch to default and correct DB
-                        trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
-                        database.child("children").child(normalizedKey).child("photoUrl")
-                            .setValue(DEFAULT_CHILD_PHOTO_URL)
-                        return
-                    }
-
-                    // Check metadata to ensure the file still exists in Storage
-                    storageRef.metadata
-                        .addOnSuccessListener {
-                            // File exists — no need to emit again
-                        }
-                        .addOnFailureListener { _ ->
-                            // File missing or inaccessible — set DB to default and emit default
-                            trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
-                            database.child("children").child(normalizedKey).child("photoUrl")
-                                .setValue(DEFAULT_CHILD_PHOTO_URL)
-                        }
-                } catch (e: Exception) {
-                    // Any unexpected failure -> fall back to default
-                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
-                }
+                // Emit DB value only
+                trySend(dbUrl).isSuccess
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -550,27 +517,30 @@ class ParentDashboardViewModel : ViewModel() {
 
         dbRef.addValueEventListener(listener)
 
-        // Add periodic check to re-validate metadata every 10 seconds
+        // Periodic check to fix deleted files
         val job = viewModelScope.launch {
             while (true) {
-                delay(10000) // Check every 10 seconds
-                dbRef.get().addOnSuccessListener { snapshot ->
-                    val currentDbUrl = snapshot.getValue(String::class.java).orEmpty()
-                    if (currentDbUrl.isNotBlank()) {
+                delay(10000)
+                try {
+                    val snapshot = dbRef.get().await()
+                    val currentUrl = snapshot.getValue(String::class.java).orEmpty()
+                    if (currentUrl.isNotBlank()) {
                         try {
-                            val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
-                            val storageRef = storage.getReferenceFromUrl(currentDbUrl)
+                            val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance()
+                                .getReferenceFromUrl(currentUrl)
                             storageRef.metadata
                                 .addOnFailureListener {
-                                    // If metadata fails (file deleted), update DB and emit default
-                                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                                    // Only update if file missing
                                     dbRef.setValue(DEFAULT_CHILD_PHOTO_URL)
+                                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
                                 }
-                        } catch (e: Exception) {
-                            trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                        } catch (_: Exception) {
                             dbRef.setValue(DEFAULT_CHILD_PHOTO_URL)
+                            trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
                         }
                     }
+                } catch (_: Exception) {
+                    // Ignore transient read errors
                 }
             }
         }
