@@ -3,28 +3,44 @@ package com.manjano.bus.ui.screens.home
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.google.firebase.database.*
+import com.google.android.gms.maps.model.LatLng
+import com.google.firebase.database.ChildEventListener
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import com.google.firebase.database.DatabaseReference
+import com.google.firebase.database.FirebaseDatabase
+import com.google.firebase.database.ValueEventListener
+import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.channels.awaitClose
-import kotlinx.coroutines.flow.*
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.tasks.await
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.tasks.await
 
 class ParentDashboardViewModel : ViewModel() {
 
-    private val database =
-        FirebaseDatabase.getInstance("https://manjano-bus-default-rtdb.firebaseio.com/")
-            .reference
+    // --- BUS LOCATION STATEFLOWS ---
+    private val _busLocations = mutableMapOf<String, MutableStateFlow<LatLng>>()
+    val busLocations: Map<String, StateFlow<LatLng>> get() = _busLocations
 
-    // real-time children list (paste inside ParentDashboardViewModel, after `database`)
+    fun getBusFlow(busId: String): StateFlow<LatLng> {
+        return _busLocations.getOrPut(busId) {
+            MutableStateFlow(LatLng(-1.2921, 36.8219))
+        }
+    }
+
+    private val database =
+        FirebaseDatabase.getInstance("https://manjano-bus-default-rtdb.firebaseio.com/").reference
+
+    // --- Real-time children list ---
     private val _childrenKeys = MutableStateFlow<List<String>>(emptyList())
     val childrenKeys: StateFlow<List<String>> = _childrenKeys
-
     private val childrenRef = database.child("children")
 
     private val childrenEventListener = object : ChildEventListener {
@@ -38,8 +54,10 @@ class ParentDashboardViewModel : ViewModel() {
             }
         }
 
-        override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
-            // no-op here (we only care about add/remove for the dropdown keys)
+        override fun onChildChanged(
+            snapshot: DataSnapshot,
+            previousChildName: String?
+        ) { /* no-op */
         }
 
         override fun onChildRemoved(snapshot: DataSnapshot) {
@@ -59,19 +77,17 @@ class ParentDashboardViewModel : ViewModel() {
         }
     }
 
-    // attach listener (you may already have an init block — if so, put this line there; otherwise add an init{})
     init {
+        observeBusLocation()
         childrenRef.addChildEventListener(childrenEventListener)
-    }
+        fixMismatchedDisplayNamesWithStateFlow()
 
-    init {
-        fixMismatchedDisplayNames()
-    }
-    init {
+        // Periodic storage check
         viewModelScope.launch {
             while (true) {
                 try {
-                    val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
+                    val storage =
+                        FirebaseStorage.getInstance().reference.child("Children Images")
                     val listResult = suspendCancellableCoroutine { cont ->
                         storage.listAll()
                             .addOnSuccessListener { cont.resume(it) }
@@ -83,417 +99,249 @@ class ParentDashboardViewModel : ViewModel() {
                 } catch (e: Exception) {
                     Log.e("🔥", "Periodic storage check failed: ${e.message}")
                 }
-                delay(10000) // every 10 seconds
+                delay(10000)
             }
         }
     }
-     /** Create child node ONLY if it doesn't exist; do NOT overwrite existing ETA.
-     *  Important: at creation time we explicitly set photoUrl → DEFAULT_CHILD_PHOTO_URL
-     *  to avoid any incorrect inference. Matching against Storage should happen
-     *  separately when a verified list of storage filenames/URLs is available.
-     */
+
+    private fun observeBusLocation() {
+        val busRef = database.child("busLocation")
+        busRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val busId = snapshot.key ?: "unknown_bus"
+                val lat = snapshot.child("lat").getValue(Double::class.java)
+                val lng = snapshot.child("lng").getValue(Double::class.java)
+                if (lat != null && lng != null) {
+                    _busLocations.getOrPut(busId) {
+                        MutableStateFlow(
+                            LatLng(
+                                -1.2921,
+                                36.8219
+                            )
+                        )
+                    }.value =
+                        LatLng(lat, lng)
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("ParentDashboard", "Bus location listener cancelled: ${error.message}")
+            }
+        })
+    }
+
     private fun createChildIfMissing(childKey: String, displayName: String) {
         val ref = database.child("children").child(childKey)
         ref.get().addOnSuccessListener { snapshot ->
             if (!snapshot.exists()) {
-                Log.d("🔥", "🆕 Creating child node '$childKey' with displayName: $displayName")
                 val defaultData = mapOf(
                     "displayName" to displayName,
-                    "eta" to "Arriving in 5 minutes", // only used for new nodes
+                    "eta" to "Arriving in 5 minutes",
                     "status" to "On Route",
                     "messages" to emptyMap<String, Any>(),
-                    // Ensure new nodes always get the canonical default photo url.
                     "photoUrl" to DEFAULT_CHILD_PHOTO_URL
                 )
                 ref.updateChildren(defaultData)
-                    .addOnSuccessListener {
-                        Log.d("🔥", "✅ Child '$childKey' created successfully (photoUrl set to default)")
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e("🔥", "❌ Failed to create child '$childKey': ${e.message}")
-                    }
             } else {
-                Log.d("🔥", "✅ Child '$childKey' already exists — no overwrite")
-                // Only fill missing fields if necessary, without touching 'eta' or existing photoUrl.
                 val updates = mutableMapOf<String, Any>()
                 if (!snapshot.hasChild("displayName")) updates["displayName"] = displayName
                 if (!snapshot.hasChild("status")) updates["status"] = "On Route"
                 if (!snapshot.hasChild("messages")) updates["messages"] = emptyMap<String, Any>()
-                // If photoUrl is missing, set to default (but do NOT overwrite an existing photoUrl)
                 if (!snapshot.hasChild("photoUrl")) updates["photoUrl"] = DEFAULT_CHILD_PHOTO_URL
-
-                if (updates.isNotEmpty()) {
-                    Log.d("🔥", "🩹 Filling missing fields for '$childKey': $updates")
-                    ref.updateChildren(updates)
-                }
+                if (updates.isNotEmpty()) ref.updateChildren(updates)
             }
-        }.addOnFailureListener { error ->
-            Log.e("🔥", "❌ Failed to check '$childKey': ${error.message}")
         }
     }
 
-    /** Detect and fix mismatched child keys when displayName changes manually in Firebase */
-    private fun fixMismatchedDisplayNames() {
-        val childrenRef = database.child("children")
-
+    /** Fix display name mismatches and keep _childrenKeys updated */
+    private fun fixMismatchedDisplayNamesWithStateFlow() {
         childrenRef.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                for (childSnapshot in snapshot.children) {
-                    val oldKey = childSnapshot.key ?: continue
+                snapshot.children.forEach { childSnapshot ->
+                    val oldKey = childSnapshot.key ?: return@forEach
                     val displayName =
-                        childSnapshot.child("displayName").getValue(String::class.java) ?: continue
-
+                        childSnapshot.child("displayName").getValue(String::class.java)
+                            ?: return@forEach
                     val newKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-
-                    // ✅ Rename only if necessary
                     if (oldKey != newKey) {
-                        Log.d("🔥", "⚙️ Renaming '$oldKey' → '$newKey'")
-
                         renameChildNode(oldKey, newKey) { renamedKey ->
-                            Log.d("🔥", "🔁 App now tracks '$renamedKey'")
-
-                            // ⚡ Immediately refresh live listeners so UI switches seamlessly
-                            viewModelScope.launch {
-                                getEtaFlowByName(renamedKey)
-                                getDisplayNameFlow(renamedKey)
+                            val current = _childrenKeys.value.toMutableList()
+                            if (!current.contains(renamedKey)) {
+                                current.add(renamedKey)
+                                _childrenKeys.value = current
                             }
+                        }
+                    } else {
+                        val current = _childrenKeys.value.toMutableList()
+                        if (!current.contains(oldKey)) {
+                            current.add(oldKey)
+                            _childrenKeys.value = current
                         }
                     }
                 }
             }
 
             override fun onCancelled(error: DatabaseError) {
-                Log.e("🔥", "❌ Error observing children: ${error.message}")
+                Log.e("🔥", "fixMismatchedDisplayNamesWithStateFlow cancelled: ${error.message}")
             }
         })
     }
 
-
-    /** Rename a child node safely, update active listeners, and delete old node */
     private fun renameChildNode(oldKey: String, newKey: String, onRenamed: (String) -> Unit = {}) {
-        val childrenRef = database.child("children")
-
         childrenRef.child(oldKey).get().addOnSuccessListener { snapshot ->
-            if (!snapshot.exists()) {
-                Log.w("🔥", "⚠️ No data found for oldKey='$oldKey', skipping rename")
-                return@addOnSuccessListener
-            }
-
+            if (!snapshot.exists()) return@addOnSuccessListener
             val oldData = snapshot.value
-
-            // 1️⃣ Copy all data to the new node
-            childrenRef.child(newKey).setValue(oldData)
-                .addOnSuccessListener {
-                    Log.d("🔥", "✅ Data copied from '$oldKey' → '$newKey'")
-
-                    // 2️⃣ Immediately reattach app listeners to the new node
-                    viewModelScope.launch {
-                        Log.d("🔥", "🔁 Switching app listeners to '$newKey'")
-                        getEtaFlowByName(newKey)
-                        getDisplayNameFlow(newKey)
-                    }
-
-                    // 3️⃣ Wait a moment to ensure flows stabilize
-                    viewModelScope.launch {
-                        kotlinx.coroutines.delay(2000)
-
-                        // 4️⃣ Delete the old node safely
-                        childrenRef.child(oldKey).removeValue()
-                            .addOnSuccessListener {
-                                Log.d("🔥", "🧹 Deleted old node '$oldKey' after rename")
-                                onRenamed(newKey)
-                            }
-                            .addOnFailureListener { e ->
-                                Log.e("🔥", "❌ Failed to delete old node '$oldKey': ${e.message}")
-                            }
+            childrenRef.child(newKey).setValue(oldData).addOnSuccessListener {
+                viewModelScope.launch {
+                    getEtaFlowByName(newKey)
+                    getDisplayNameFlow(newKey)
+                }
+                viewModelScope.launch {
+                    delay(2000)
+                    childrenRef.child(oldKey).removeValue().addOnSuccessListener {
+                        onRenamed(newKey)
                     }
                 }
-                .addOnFailureListener { e ->
-                    Log.e("🔥", "❌ Failed to copy data to '$newKey': ${e.message}")
-                }
-        }.addOnFailureListener { e ->
-            Log.e("🔥", "❌ Error fetching oldKey='$oldKey': ${e.message}")
+            }
         }
     }
-
 
     private fun ViewModel.addCloseableListener(
         ref: DatabaseReference,
         listener: ValueEventListener
     ) {
-        this.addCloseable {
-            ref.removeEventListener(listener)
-        }
+        this.addCloseable { ref.removeEventListener(listener) }
     }
 
     private fun ViewModel.addCloseable(onCleared: () -> Unit) {
-        val vm = this
-        vm.viewModelScope.launch {
+        viewModelScope.launch {
             try {
-                kotlinx.coroutines.delay(Long.MAX_VALUE)
+                delay(Long.MAX_VALUE)
             } finally {
                 onCleared()
             }
         }
     }
 
-    /** Observe ETA updates (persistent real-time listener, no duplicate logs) */
+    /** Observe ETA updates */
     fun getEtaFlowByName(childName: String): StateFlow<String> {
         val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-        Log.d("🔥", "🔍 Observing ETA for '$key' (original: $childName)")
-
         val etaFlow = MutableStateFlow("Loading...")
-
-        // Ensure child exists only once
-        viewModelScope.launch {
-            createChildIfMissing(key, childName)
-        }
+        viewModelScope.launch { createChildIfMissing(key, childName) }
 
         val ref = database.child("children").child(key).child("eta")
-
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val eta = snapshot.getValue(String::class.java) ?: "Arriving in 5 minutes"
-                // Only update if value changed
-                if (etaFlow.value != eta) {
-                    Log.d("🔥", "✅ ETA update from Firebase: '$eta'")
-                    etaFlow.value = eta
-                }
+                if (etaFlow.value != eta) etaFlow.value = eta
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (etaFlow.value != "Error loading ETA") {
-                    Log.e("🔥", "❌ Failed to fetch ETA: ${error.message}")
-                    etaFlow.value = "Error loading ETA"
-                }
+                if (etaFlow.value != "Error loading ETA") etaFlow.value = "Error loading ETA"
             }
         }
-
-        // Attach listener
         ref.addValueEventListener(listener)
         addCloseableListener(ref, listener)
-
         return etaFlow
     }
 
-    /** Observe displayName updates (real-time) */
+    /** Observe displayName updates */
     fun getDisplayNameFlow(childName: String): StateFlow<String> {
         val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-        Log.d("🔥", "🔍 Observing displayName for '$key' (original: $childName)")
-
         val nameFlow = MutableStateFlow("Loading...")
-
-        // Attach listener
         val ref = database.child("children").child(key).child("displayName")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val name = snapshot.getValue(String::class.java) ?: childName
-                if (nameFlow.value != name) {
-                    Log.d("🔥", "✅ displayName update from Firebase: '$name'")
-                    nameFlow.value = name
-                }
+                if (nameFlow.value != name) nameFlow.value = name
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (nameFlow.value != "Error loading name") {
-                    Log.e("🔥", "❌ Failed to fetch displayName: ${error.message}")
-                    nameFlow.value = "Error loading name"
-                }
+                if (nameFlow.value != "Error loading name") nameFlow.value = "Error loading name"
             }
         }
-
         ref.addValueEventListener(listener)
         addCloseableListener(ref, listener)
-
         return nameFlow
     }
 
-    /** Observe child's status updates (real-time) */
+    /** Observe child's status */
     fun getStatusFlow(childName: String): StateFlow<String> {
         val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-        Log.d("🔥", "🔍 Observing status for '$key' (original: $childName)")
-
         val statusFlow = MutableStateFlow("Loading...")
-
         val ref = database.child("children").child(key).child("status")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val status = snapshot.getValue(String::class.java) ?: "Unknown"
-                if (statusFlow.value != status) {
-                    Log.d("🔥", "✅ Status update from Firebase: '$status'")
-                    statusFlow.value = status
-                }
+                if (statusFlow.value != status) statusFlow.value = status
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (statusFlow.value != "Error loading status") {
-                    Log.e("🔥", "❌ Failed to fetch status: ${error.message}")
-                    statusFlow.value = "Error loading status"
-                }
+                if (statusFlow.value != "Error loading status") statusFlow.value =
+                    "Error loading status"
             }
         }
-
         ref.addValueEventListener(listener)
         addCloseableListener(ref, listener)
-
         return statusFlow
     }
 
-    /** Update child's status (no child creation) */
+    /** Update child's status */
     fun updateChildStatus(childName: String, newStatus: String) {
         val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-        Log.d("🔥", "🔍 Updating status for '$key' to '$newStatus'")
-        database.child("children").child(key).child("status")
-            .setValue(newStatus)
-            .addOnSuccessListener {
-                Log.d("🔥", "✅ Status updated for '$key'")
-            }
-            .addOnFailureListener { e ->
-                Log.e("🔥", "❌ Failed to update status: ${e.message}")
-            }
+        database.child("children").child(key).child("status").setValue(newStatus)
     }
 
-    /** Send quick action message (no child creation) */
+    /** Send quick action message */
     fun sendQuickActionMessage(childName: String, action: String, message: String) {
         val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-        Log.d("🔥", "📩 Sending message for '$key' ($action): $message")
-
         val messageRef = database.child("children").child(key).child("messages").push()
         val msgData = mapOf(
             "action" to action,
             "message" to message,
             "timestamp" to System.currentTimeMillis()
         )
-
         messageRef.setValue(msgData)
-            .addOnSuccessListener {
-                Log.d("🔥", "✅ Message sent for '$key'")
-            }
-            .addOnFailureListener { e ->
-                Log.e("🔥", "❌ Failed to send message: ${e.message}")
-            }
     }
 
-    /** Calculate Levenshtein distance between two strings */
-    private fun levenshteinDistance(lhs: String, rhs: String): Int {
-        val lhsLength = lhs.length
-        val rhsLength = rhs.length
-
-        val dp = Array(lhsLength + 1) { IntArray(rhsLength + 1) }
-
-        for (i in 0..lhsLength) dp[i][0] = i
-        for (j in 0..rhsLength) dp[0][j] = j
-
-        for (i in 1..lhsLength) {
-            for (j in 1..rhsLength) {
-                val cost = if (lhs[i - 1] == rhs[j - 1]) 0 else 1
-                dp[i][j] = minOf(
-                    dp[i - 1][j] + 1,      // deletion
-                    dp[i][j - 1] + 1,      // insertion
-                    dp[i - 1][j - 1] + cost // substitution
-                )
-            }
-        }
-
-        return dp[lhsLength][rhsLength]
-    }
-
-    companion object {
-        private const val DEFAULT_CHILD_PHOTO_URL =
-            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
-    }
-
-
-    /** Assign each child's photo strictly by exact match; fallback to default if none found */
+    /** Save child image */
     private fun saveChildImage(childKey: String, displayName: String, storageFiles: List<String>) {
         val normalizedChild = childKey.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-
-        // ✅ Create a map of exact normalized file names
         val normalizedFiles = storageFiles.associateBy {
-            it.substringBeforeLast(".")
-                .substringAfterLast("/")               // remove folder path
-                .lowercase()                           // standardize case
-                .replace(Regex("[^a-z0-9]"), "_")      // normalize symbols/spaces
+            it.substringBeforeLast(".").substringAfterLast("/").lowercase()
+                .replace(Regex("[^a-z0-9]"), "_")
         }
-
-        // ✅ Exact lookup only — get the file that exactly matches this child
         val matchedFile = normalizedFiles[normalizedChild]
-
-        // ✅ Only use exact match; no partial or substring matching
-        val finalUrl = if (matchedFile == null) {
-            // fallback to explicit Default Image file
-            DEFAULT_CHILD_PHOTO_URL
-        } else {
-            // matchedFile is the filename in Children Images — include the folder path in the public URL
-            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
-        }
-
-
-        Log.d("🔥", "✅ Saved '$childKey' → ${if (matchedFile == null) "a.png" else matchedFile}")
-
-        database.child("children").child(normalizedChild).child("photoUrl")
-            .setValue(finalUrl)
-            .addOnSuccessListener {
-                Log.d("🔥", "✅ Photo URL saved for '$childKey'")
-            }
-            .addOnFailureListener { e ->
-                Log.e("🔥", "❌ Failed to save photo URL for '$childKey': ${e.message}")
-            }
+        val finalUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
+        else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
+        database.child("children").child(normalizedChild).child("photoUrl").setValue(finalUrl)
     }
 
-    /** Step 2: Scan all children and repair photoUrl links using verified storage files */
+    /** Repair all child images */
     fun repairAllChildImages(storageFiles: List<String>) {
         val normalizedFiles = storageFiles.associateBy {
-            it.substringBeforeLast(".")
-                .substringAfterLast("/")               // remove folder path
-                .lowercase()                           // standardize case
-                .replace(Regex("[^a-z0-9]"), "")      // remove symbols/spaces instead of replacing with "_"
+            it.substringBeforeLast(".").substringAfterLast("/").lowercase()
+                .replace(Regex("[^a-z0-9]"), "")
         }
 
-        database.child("children").get()
-            .addOnSuccessListener { snapshot ->
-                if (snapshot.exists()) {
-                    snapshot.children.forEach { childSnap ->
-                        val displayName = childSnap.child("displayName").getValue(String::class.java) ?: return@forEach
-                        val normalizedKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-                        val normalizedKeyForMatch = normalizedKey.replace("_", "")  // remove "_" for matching concatenated files
+        database.child("children").get().addOnSuccessListener { snapshot ->
+            snapshot.children.forEach { childSnap ->
+                val displayName =
+                    childSnap.child("displayName").getValue(String::class.java) ?: return@forEach
+                val normalizedKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                val normalizedKeyForMatch = normalizedKey.replace("_", "")
+                val matchedFile = normalizedFiles[normalizedKeyForMatch]
+                val currentUrl = childSnap.child("photoUrl").getValue(String::class.java)
+                val verifiedUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
+                else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
 
-                        val matchedFile = normalizedFiles[normalizedKeyForMatch]
-                        val currentUrl = childSnap.child("photoUrl").getValue(String::class.java)
-
-                        Log.d("🧩 debug", "For child $displayName (key: $normalizedKey, matchKey: $normalizedKeyForMatch), matchedFile: $matchedFile, currentUrl: $currentUrl, all storageFiles: $storageFiles")
-
-                        if (matchedFile != null) {
-                            val verifiedUrl =
-                                "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
-                            Log.d("🧩 debug", "Matched file found, verifiedUrl: $verifiedUrl, is different from current? ${currentUrl != verifiedUrl}")
-
-                            if (currentUrl != verifiedUrl) {
-                                database.child("children").child(normalizedKey).child("photoUrl").setValue(verifiedUrl)
-                                Log.d("🧩 repairAllChildImages", "✅ Updated $displayName → $verifiedUrl")
-                            } else {
-                                Log.d("🧩 debug", "No update needed, currentUrl already matches verifiedUrl")
-                            }
-
-                        } else {
-                            Log.d("🧩 debug", "No matched file, setting to default")
-                            // no matching image file found — explicitly set the new default image
-                            database.child("children").child(normalizedKey).child("photoUrl")
-                                .setValue(DEFAULT_CHILD_PHOTO_URL)
-                            Log.d("🧩 repairAllChildImages", "🩹 Set $displayName → DEFAULT")
-                        }
-                    }
-                } else {
-                    Log.w("🧩 repairAllChildImages", "⚠️ No children found in database.")
-                }
+                if (currentUrl != verifiedUrl) database.child("children").child(normalizedKey)
+                    .child("photoUrl").setValue(verifiedUrl)
             }
-            .addOnFailureListener { e ->
-                Log.e("🧩 repairAllChildImages", "❌ Failed to read children: ${e.message}")
-            }
+        }
     }
 
-
-    // Make getPhotoUrlFlow accept the current storage file list so UI reacts to deletions/uploads immediately
+    /** Observe photoUrl flow with periodic repair */
     fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
         val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
@@ -501,13 +349,7 @@ class ParentDashboardViewModel : ViewModel() {
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val dbUrl = snapshot.getValue(String::class.java).orEmpty()
-                if (dbUrl.isBlank()) {
-                    // Only emit default if DB is truly empty
-                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
-                    return
-                }
-                // Emit DB value only
-                trySend(dbUrl).isSuccess
+                trySend(if (dbUrl.isBlank()) DEFAULT_CHILD_PHOTO_URL else dbUrl).isSuccess
             }
 
             override fun onCancelled(error: DatabaseError) {
@@ -517,7 +359,6 @@ class ParentDashboardViewModel : ViewModel() {
 
         dbRef.addValueEventListener(listener)
 
-        // Periodic check to fix deleted files
         val job = viewModelScope.launch {
             while (true) {
                 delay(10000)
@@ -526,37 +367,33 @@ class ParentDashboardViewModel : ViewModel() {
                     val currentUrl = snapshot.getValue(String::class.java).orEmpty()
                     if (currentUrl.isNotBlank()) {
                         try {
-                            val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance()
-                                .getReferenceFromUrl(currentUrl)
-                            storageRef.metadata
-                                .addOnFailureListener {
-                                    // Only update if file missing
-                                    dbRef.setValue(DEFAULT_CHILD_PHOTO_URL)
-                                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
-                                }
+                            val storageRef =
+                                FirebaseStorage.getInstance().getReferenceFromUrl(currentUrl)
+                            storageRef.metadata.addOnFailureListener {
+                                dbRef.setValue(DEFAULT_CHILD_PHOTO_URL)
+                                trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                            }
                         } catch (_: Exception) {
                             dbRef.setValue(DEFAULT_CHILD_PHOTO_URL)
                             trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
                         }
                     }
                 } catch (_: Exception) {
-                    // Ignore transient read errors
                 }
             }
         }
 
-        awaitClose {
-            dbRef.removeEventListener(listener)
-            job.cancel()
-        }
+        awaitClose { dbRef.removeEventListener(listener); job.cancel() }
     }.distinctUntilChanged()
 
-
-    // Fetch all image filenames from Firebase Storage, then repair photoUrl links
+    /** Fetch all storage files and repair */
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
-        Log.d("ParentDashboard", "✅ Listed ${storageFiles.size} files from Storage")
-        viewModelScope.launch {
-            repairAllChildImages(storageFiles)
-        }
+        viewModelScope.launch { repairAllChildImages(storageFiles) }
+    }
+
+    companion object {
+        private const val DEFAULT_CHILD_PHOTO_URL =
+            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
     }
 }
+

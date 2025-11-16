@@ -665,7 +665,7 @@ fun ParentDashboardScreen(
                                 )
                             ) {
                                 Text(
-                                    text = "Enter",
+                                    text = "Send",
                                     color = Color.White,
                                     fontSize = if (uiSizes.isTablet) 14.sp else 12.sp,
                                     fontWeight = FontWeight.Bold
