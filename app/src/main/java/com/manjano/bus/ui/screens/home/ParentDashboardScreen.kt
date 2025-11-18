@@ -372,22 +372,19 @@ fun ParentDashboardScreen(
                             }
                     }
 
-                    // --- PHOTO URL FLOW (NEW) ---
+                    // --- PHOTO URL FLOW (FINAL FIX: no flicker + instantly detects deleted OR re-uploaded images) ---
                     launch {
                         viewModel.getPhotoUrlFlow(selectedChild.value.name)
-                            .collectLatest { url ->
-                                val safeUrl = url.ifBlank { defaultPhotoUrl }
+                            .collectLatest { urlFromFlow ->
+                                val finalUrl = if (urlFromFlow.isBlank() || urlFromFlow.contains("defaultchild.png")) {
+                                    defaultPhotoUrl
+                                } else {
+                                    urlFromFlow
+                                }
 
-                                // Only update if the URL has actually changed and it's not the default flipping
-                                if (selectedChild.value.photoUrl != safeUrl &&
-                                    (safeUrl != defaultPhotoUrl || selectedChild.value.photoUrl == defaultPhotoUrl)
-                                ) {
-                                    selectedChild.value =
-                                        selectedChild.value.copy(photoUrl = safeUrl)
-                                    Log.d(
-                                        "🖼️ SelectedChild",
-                                        "Updated ${selectedChild.value.name} -> $safeUrl"
-                                    )
+                                if (selectedChild.value.photoUrl != finalUrl) {
+                                    selectedChild.value = selectedChild.value.copy(photoUrl = finalUrl)
+                                    Log.d("🖼️ SelectedChild", "Photo updated for ${selectedChild.value.name} → $finalUrl")
                                 }
                             }
                     }

@@ -22,6 +22,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlinx.coroutines.isActive
 
 class ParentDashboardViewModel : ViewModel() {
 
@@ -341,7 +342,7 @@ class ParentDashboardViewModel : ViewModel() {
         }
     }
 
-    /** Observe photoUrl flow with periodic repair */
+    /** Observe photoUrl flow with periodic repair (improved: immediate storage verification) */
     fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
         val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
@@ -359,31 +360,44 @@ class ParentDashboardViewModel : ViewModel() {
 
         dbRef.addValueEventListener(listener)
 
+        // Periodic verification job: try to fetch metadata using await() so failures are caught immediately
         val job = viewModelScope.launch {
-            while (true) {
-                delay(10000)
+            while (coroutineContext.isActive) {
+                delay(5000) // check every 5s (fast reaction without being too aggressive)
                 try {
                     val snapshot = dbRef.get().await()
                     val currentUrl = snapshot.getValue(String::class.java).orEmpty()
-                    if (currentUrl.isNotBlank()) {
+
+                    if (currentUrl.isNotBlank() && currentUrl != DEFAULT_CHILD_PHOTO_URL) {
                         try {
-                            val storageRef =
-                                FirebaseStorage.getInstance().getReferenceFromUrl(currentUrl)
-                            storageRef.metadata.addOnFailureListener {
-                                dbRef.setValue(DEFAULT_CHILD_PHOTO_URL)
-                                trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                            // Will throw if the URL is invalid or the file was removed
+                            val storageRef = com.google.firebase.storage.FirebaseStorage
+                                .getInstance()
+                                .getReferenceFromUrl(currentUrl)
+
+                            // Use await() on metadata to fail fast for deleted/invalid files
+                            storageRef.metadata.await()
+                            // If metadata fetch succeeds — file exists — do nothing.
+                        } catch (e: Exception) {
+                            // File missing or URL invalid — force DB -> default and emit default immediately
+                            try {
+                                dbRef.setValue(DEFAULT_CHILD_PHOTO_URL).await()
+                            } catch (_: Exception) {
+                                // If setValue fails, still emit default locally so UI updates immediately
                             }
-                        } catch (_: Exception) {
-                            dbRef.setValue(DEFAULT_CHILD_PHOTO_URL)
                             trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
                         }
                     }
                 } catch (_: Exception) {
+                    // Ignore transient errors (network, race conditions). Next iteration will retry.
                 }
             }
         }
 
-        awaitClose { dbRef.removeEventListener(listener); job.cancel() }
+        awaitClose {
+            dbRef.removeEventListener(listener)
+            job.cancel()
+        }
     }.distinctUntilChanged()
 
     /** Fetch all storage files and repair */
