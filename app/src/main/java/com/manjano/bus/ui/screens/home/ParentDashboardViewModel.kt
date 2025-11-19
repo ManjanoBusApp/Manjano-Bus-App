@@ -334,6 +334,16 @@ class ParentDashboardViewModel : ViewModel() {
                         ?.value
                 }
 
+                // If still no match, try name permutation matching (for full names)
+                if (matchedFile == null) {
+                    matchedFile = findNamePermutationMatch(normalizedKey, normalizedFiles)
+                }
+
+                // If still no match, try flexible matching for partial names and initials
+                if (matchedFile == null) {
+                    matchedFile = findFlexibleMatch(normalizedKey, normalizedFiles)
+                }
+
                 val verifiedUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
                 else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
 
@@ -345,6 +355,38 @@ class ParentDashboardViewModel : ViewModel() {
             }
         }
     }
+
+    /** Find match by checking if child name and image name contain the same set of words (name order independence) */
+    private fun findNamePermutationMatch(childName: String, normalizedFiles: Map<String, String>): String? {
+        val childParts = childName.split("_").filter { it.isNotBlank() }.toSet()
+        if (childParts.isEmpty()) return null
+
+        return normalizedFiles.entries.find { (imageName, _) ->
+            val imageParts = imageName.split("_").filter { it.isNotBlank() }.toSet()
+            // Check if both have exactly the same set of name parts (order doesn't matter)
+            childParts == imageParts
+        }?.value
+    }
+
+    /** Find flexible match handling partial names and initials */
+    private fun findFlexibleMatch(childName: String, normalizedFiles: Map<String, String>): String? {
+        val childParts = childName.split("_").filter { it.isNotBlank() }
+        if (childParts.isEmpty()) return null
+
+        return normalizedFiles.entries.find { (imageName, _) ->
+            val imageParts = imageName.split("_").filter { it.isNotBlank() }
+
+            // Check if all child parts match image parts (either full match or initial match)
+            childParts.all { childPart ->
+                imageParts.any { imagePart ->
+                    // Full word match OR initial match (child part is single letter and matches start of image part)
+                    childPart == imagePart ||
+                            (childPart.length == 1 && imagePart.startsWith(childPart))
+                }
+            }
+        }?.value
+    }
+
 
     /** Observe photoUrl flow with periodic repair (improved: detects re-uploads) */
     fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
