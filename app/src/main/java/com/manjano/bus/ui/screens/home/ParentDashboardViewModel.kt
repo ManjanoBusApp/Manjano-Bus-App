@@ -83,24 +83,20 @@ class ParentDashboardViewModel : ViewModel() {
         childrenRef.addChildEventListener(childrenEventListener)
         fixMismatchedDisplayNamesWithStateFlow()
 
-        // Periodic storage check
+        // Run repair ONCE on startup, not periodically
         viewModelScope.launch {
-            while (true) {
-                try {
-                    val storage =
-                        FirebaseStorage.getInstance().reference.child("Children Images")
-                    val listResult = suspendCancellableCoroutine { cont ->
-                        storage.listAll()
-                            .addOnSuccessListener { cont.resume(it) }
-                            .addOnFailureListener { cont.resumeWithException(it) }
-                    }
-                    val storageFiles = listResult.items.map { it.name }
-                    repairAllChildImages(storageFiles)
-                    Log.d("🔥", "Periodic storage check completed, files: ${storageFiles.size}")
-                } catch (e: Exception) {
-                    Log.e("🔥", "Periodic storage check failed: ${e.message}")
+            try {
+                val storage = FirebaseStorage.getInstance().reference.child("Children Images")
+                val listResult = suspendCancellableCoroutine { cont ->
+                    storage.listAll()
+                        .addOnSuccessListener { cont.resume(it) }
+                        .addOnFailureListener { cont.resumeWithException(it) }
                 }
-                delay(10000)
+                val storageFiles = listResult.items.map { it.name }
+                repairAllChildImages(storageFiles)
+                Log.d("🔥", "Initial storage repair completed, files: ${storageFiles.size}")
+            } catch (e: Exception) {
+                Log.e("🔥", "Initial storage repair failed: ${e.message}")
             }
         }
     }
@@ -154,30 +150,16 @@ class ParentDashboardViewModel : ViewModel() {
         }
     }
 
-    /** Fix display name mismatches and keep _childrenKeys updated */
+    /** Keep _childrenKeys updated without renaming nodes */
     private fun fixMismatchedDisplayNamesWithStateFlow() {
         childrenRef.addValueEventListener(object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 snapshot.children.forEach { childSnapshot ->
-                    val oldKey = childSnapshot.key ?: return@forEach
-                    val displayName =
-                        childSnapshot.child("displayName").getValue(String::class.java)
-                            ?: return@forEach
-                    val newKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-                    if (oldKey != newKey) {
-                        renameChildNode(oldKey, newKey) { renamedKey ->
-                            val current = _childrenKeys.value.toMutableList()
-                            if (!current.contains(renamedKey)) {
-                                current.add(renamedKey)
-                                _childrenKeys.value = current
-                            }
-                        }
-                    } else {
-                        val current = _childrenKeys.value.toMutableList()
-                        if (!current.contains(oldKey)) {
-                            current.add(oldKey)
-                            _childrenKeys.value = current
-                        }
+                    val key = childSnapshot.key ?: return@forEach
+                    val current = _childrenKeys.value.toMutableList()
+                    if (!current.contains(key)) {
+                        current.add(key)
+                        _childrenKeys.value = current
                     }
                 }
             }
@@ -318,87 +300,122 @@ class ParentDashboardViewModel : ViewModel() {
         database.child("children").child(normalizedChild).child("photoUrl").setValue(finalUrl)
     }
 
-    /** Repair all child images */
+
+    /** Repair all child images - optimized to avoid unnecessary updates */
     fun repairAllChildImages(storageFiles: List<String>) {
         val normalizedFiles = storageFiles.associateBy {
-            it.substringBeforeLast(".").substringAfterLast("/").lowercase()
-                .replace(Regex("[^a-z0-9]"), "")
+            it.substringBeforeLast(".").substringAfterLast("/").lowercase().replace(Regex("[^a-z0-9]"), "_")
         }
 
         database.child("children").get().addOnSuccessListener { snapshot ->
             snapshot.children.forEach { childSnap ->
-                val displayName =
-                    childSnap.child("displayName").getValue(String::class.java) ?: return@forEach
+                val displayName = childSnap.child("displayName").getValue(String::class.java) ?: return@forEach
                 val normalizedKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-                val normalizedKeyForMatch = normalizedKey.replace("_", "")
-                val matchedFile = normalizedFiles[normalizedKeyForMatch]
-                val currentUrl = childSnap.child("photoUrl").getValue(String::class.java)
+                val currentUrl = childSnap.child("photoUrl").getValue(String::class.java).orEmpty()
+
+                // Skip if current URL is already a custom image (not default) and we don't have a better match
+                if (currentUrl != DEFAULT_CHILD_PHOTO_URL && currentUrl.isNotBlank()) {
+                    // Extract filename from current URL to see if it still exists in storage
+                    val currentFileName = currentUrl.substringAfterLast("%2F").substringBefore("?")
+                    if (storageFiles.contains(currentFileName)) {
+                        // Current custom image still exists, no need to change anything
+                        return@forEach
+                    }
+                }
+
+                // Try exact match first
+                var matchedFile = normalizedFiles[normalizedKey]
+
+                // If no exact match, try matching without underscores
+                if (matchedFile == null) {
+                    val keyWithoutUnderscores = normalizedKey.replace("_", "")
+                    matchedFile = normalizedFiles.entries
+                        .find { it.key.replace("_", "") == keyWithoutUnderscores }
+                        ?.value
+                }
+
                 val verifiedUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
                 else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
 
-                if (currentUrl != verifiedUrl) database.child("children").child(normalizedKey)
-                    .child("photoUrl").setValue(verifiedUrl)
+                // Only update DB if URL has actually changed
+                if (currentUrl != verifiedUrl) {
+                    database.child("children").child(normalizedKey).child("photoUrl").setValue(verifiedUrl)
+                    Log.d("🔥", "✅ Saved '$normalizedKey' with image ${matchedFile ?: "default"}")
+                }
             }
         }
     }
 
-    /** Observe photoUrl flow with periodic repair (improved: immediate storage verification) */
+    /** Observe photoUrl flow with periodic repair (improved: detects re-uploads) */
     fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
         val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
 
+        // Keep track of last emitted value to avoid unnecessary updates
+        var lastUrl: String? = null
+
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val dbUrl = snapshot.getValue(String::class.java).orEmpty()
-                trySend(if (dbUrl.isBlank()) DEFAULT_CHILD_PHOTO_URL else dbUrl).isSuccess
+                val dbUrl = snapshot.getValue(String::class.java).orEmpty().ifBlank { DEFAULT_CHILD_PHOTO_URL }
+                if (dbUrl != lastUrl) {
+                    lastUrl = dbUrl
+                    trySend(dbUrl).isSuccess
+                }
             }
 
             override fun onCancelled(error: DatabaseError) {
-                trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                if (lastUrl != DEFAULT_CHILD_PHOTO_URL) {
+                    lastUrl = DEFAULT_CHILD_PHOTO_URL
+                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                }
             }
         }
 
         dbRef.addValueEventListener(listener)
 
-        // Periodic verification job: try to fetch metadata using await() so failures are caught immediately
+        // Periodic verification job - checks for both deletions AND re-uploads
         val job = viewModelScope.launch {
             while (coroutineContext.isActive) {
-                delay(5000) // check every 5s (fast reaction without being too aggressive)
+                delay(15000) // check every 15s - good balance
                 try {
+                    // Get current storage files to detect re-uploads
+                    val storage = FirebaseStorage.getInstance().reference.child("Children Images")
+                    val listResult = storage.listAll().await()
+                    val storageFiles = listResult.items.map { it.name }
+
+                    // Run repair to update URLs if images were re-uploaded
+                    repairAllChildImages(storageFiles)
+
+                    // Also verify current URL still exists (for deleted images)
                     val snapshot = dbRef.get().await()
                     val currentUrl = snapshot.getValue(String::class.java).orEmpty()
-
                     if (currentUrl.isNotBlank() && currentUrl != DEFAULT_CHILD_PHOTO_URL) {
                         try {
-                            // Will throw if the URL is invalid or the file was removed
                             val storageRef = com.google.firebase.storage.FirebaseStorage
                                 .getInstance()
                                 .getReferenceFromUrl(currentUrl)
-
-                            // Use await() on metadata to fail fast for deleted/invalid files
                             storageRef.metadata.await()
-                            // If metadata fetch succeeds — file exists — do nothing.
                         } catch (e: Exception) {
-                            // File missing or URL invalid — force DB -> default and emit default immediately
-                            try {
+                            // Image was deleted, set to default
+                            if (lastUrl != DEFAULT_CHILD_PHOTO_URL) {
                                 dbRef.setValue(DEFAULT_CHILD_PHOTO_URL).await()
-                            } catch (_: Exception) {
-                                // If setValue fails, still emit default locally so UI updates immediately
+                                lastUrl = DEFAULT_CHILD_PHOTO_URL
+                                trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
                             }
-                            trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
                         }
                     }
-                } catch (_: Exception) {
-                    // Ignore transient errors (network, race conditions). Next iteration will retry.
+                } catch (e: Exception) {
+                    Log.e("🔥", "Photo URL periodic check failed: ${e.message}")
                 }
             }
         }
-
+        
         awaitClose {
             dbRef.removeEventListener(listener)
             job.cancel()
         }
     }.distinctUntilChanged()
+
 
     /** Fetch all storage files and repair */
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
