@@ -308,47 +308,38 @@ class ParentDashboardViewModel : ViewModel() {
         }
 
         database.child("children").get().addOnSuccessListener { snapshot ->
+            // First, collect ALL children and their data
+            val childrenToProcess = mutableListOf<Triple<String, String, String>>()
+
             snapshot.children.forEach { childSnap ->
                 val displayName = childSnap.child("displayName").getValue(String::class.java) ?: return@forEach
                 val normalizedKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
                 val currentUrl = childSnap.child("photoUrl").getValue(String::class.java).orEmpty()
 
-                // Skip if current URL is already a custom image (not default) and we don't have a better match
-                if (currentUrl != DEFAULT_CHILD_PHOTO_URL && currentUrl.isNotBlank()) {
-                    // Extract filename from current URL to see if it still exists in storage
-                    val currentFileName = currentUrl.substringAfterLast("%2F").substringBefore("?")
-                    if (storageFiles.contains(currentFileName)) {
-                        // Current custom image still exists, no need to change anything
-                        return@forEach
-                    }
+                childrenToProcess.add(Triple(normalizedKey, displayName, currentUrl))
+            }
+
+            // Now process ALL children with the complete file list
+            childrenToProcess.forEach { (normalizedKey, displayName, currentUrl) ->
+                // Check if current custom image still exists in storage
+                val currentFileName = if (currentUrl != DEFAULT_CHILD_PHOTO_URL && currentUrl.isNotBlank()) {
+                    currentUrl.substringAfterLast("%2F").substringBefore("?")
+                } else {
+                    null
                 }
 
-                // Try exact match first
-                var matchedFile = normalizedFiles[normalizedKey]
-
-                // If no exact match, try matching without underscores
-                if (matchedFile == null) {
-                    val keyWithoutUnderscores = normalizedKey.replace("_", "")
-                    matchedFile = normalizedFiles.entries
-                        .find { it.key.replace("_", "") == keyWithoutUnderscores }
-                        ?.value
+                val matchedFile = if (currentFileName != null && !storageFiles.contains(currentFileName)) {
+                    null // Set to default image
+                } else {
+                    findBestImageMatch(normalizedKey, normalizedFiles)
                 }
-
-                // If still no match, try name permutation matching (for full names)
-                if (matchedFile == null) {
-                    matchedFile = findNamePermutationMatch(normalizedKey, normalizedFiles)
-                }
-
-                // If still no match, try flexible matching for partial names and initials
-                if (matchedFile == null) {
-                    matchedFile = findFlexibleMatch(normalizedKey, normalizedFiles)
-                }
-
                 val verifiedUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
                 else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
 
                 // Only update DB if URL has actually changed
-                if (currentUrl != verifiedUrl) {
+                val shouldUpdate = currentUrl != verifiedUrl
+
+                if (shouldUpdate) {
                     database.child("children").child(normalizedKey).child("photoUrl").setValue(verifiedUrl)
                     Log.d("🔥", "✅ Saved '$normalizedKey' with image ${matchedFile ?: "default"}")
                 }
@@ -356,108 +347,113 @@ class ParentDashboardViewModel : ViewModel() {
         }
     }
 
-    /** Find match by checking if child name and image name contain the same set of words (name order independence) */
-    private fun findNamePermutationMatch(childName: String, normalizedFiles: Map<String, String>): String? {
-        val childParts = childName.split("_").filter { it.isNotBlank() }.toSet()
+    /** Smart family matching - works with separated (ati_una_kuja) AND concatenated (atiunakuja) filenames */
+    private fun findBestImageMatch(childName: String, normalizedFiles: Map<String, String>): String? {
+        val childParts = childName.split("_")
+            .filter { it.isNotBlank() }
+            .map { it.lowercase() }
+
         if (childParts.isEmpty()) return null
 
-        return normalizedFiles.entries.find { (imageName, _) ->
-            val imageParts = imageName.split("_").filter { it.isNotBlank() }.toSet()
-            // Check if both have exactly the same set of name parts (order doesn't matter)
-            childParts == imageParts
-        }?.value
-    }
+        val sortedFiles = normalizedFiles.entries.sortedBy { it.key }
 
-    /** Find flexible match handling partial names and initials */
-    private fun findFlexibleMatch(childName: String, normalizedFiles: Map<String, String>): String? {
-        val childParts = childName.split("_").filter { it.isNotBlank() }
-        if (childParts.isEmpty()) return null
+        for ((imageKey, originalFileName) in sortedFiles) {
+            val imageLower = imageKey.lowercase()
+            val imageParts = imageLower.split("_").filter { it.isNotBlank() }
 
-        return normalizedFiles.entries.find { (imageName, _) ->
-            val imageParts = imageName.split("_").filter { it.isNotBlank() }
+            val isConcatenated = imageParts.size == 1 && imageLower.length > 5
+            val concatenatedName = if (isConcatenated) imageLower else null
 
-            // Check if all child parts match image parts (either full match or initial match)
-            childParts.all { childPart ->
-                imageParts.any { imagePart ->
-                    // Full word match OR initial match (child part is single letter and matches start of image part)
-                    childPart == imagePart ||
-                            (childPart.length == 1 && imagePart.startsWith(childPart))
+            // Extract full names and initials, handling both separated and concatenated names
+            val imageFullNames = imageParts.filter { it.length > 1 }.toSet()
+            val imageInitials = if (isConcatenated) {
+                // For concatenated names, extract initials from actual names found in child parts
+                val concatenated = imageParts[0]
+                val foundInitials = mutableSetOf<String>()
+
+                // Check for each child part that's a full name in the concatenated string
+                for (childPart in childParts) {
+                    if (childPart.length > 1 && concatenated.contains(childPart)) {
+                        foundInitials.add(childPart.first().toString())
+                    }
+                }
+                foundInitials
+            } else {
+                // For separated names, use normal initial extraction
+                imageFullNames.map { it.first().toString() }.toSet()
+            }
+            var fullNameMatches = 0
+            var initialMatches = 0
+
+            for (part in childParts) {
+                if (part.length > 1) {
+                    val normalMatch = imageFullNames.contains(part)
+                    val concatMatch = concatenatedName?.contains(part) == true
+                    if (normalMatch || concatMatch) {
+                        fullNameMatches++
+                    }
+                } else if (part.length == 1) {
+                    if (imageInitials.contains(part)) {
+                        initialMatches++
+                    }
                 }
             }
-        }?.value
+
+            val rulePassed = fullNameMatches >= 2 ||
+                    (fullNameMatches == 2 && initialMatches >= 1) ||
+                    (fullNameMatches == 1 && initialMatches >= 2)
+
+// DEBUG LOG — prints ONLY when matching fails (so log stays clean even with 1000+ images)
+            if (!rulePassed) {
+                Log.d("🔥", "MATCH FAILED | child: $childName | image: $imageKey | full: $fullNameMatches | init: $initialMatches | initials: $imageInitials | concatenated: $isConcatenated")
+            }
+
+            if (rulePassed) {
+                return originalFileName
+            }
+        }
+        return null
     }
 
-
-    /** Observe photoUrl flow with periodic repair (improved: detects re-uploads) */
+    /** Observe photoUrl flow - real-time updates only without periodic repair */
     fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
         val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
 
-        // Keep track of last emitted value to avoid unnecessary updates
-        var lastUrl: String? = null
+        var previousWasCustom = false  // Tracks if the last photo was a custom image
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val dbUrl = snapshot.getValue(String::class.java).orEmpty().ifBlank { DEFAULT_CHILD_PHOTO_URL }
-                if (dbUrl != lastUrl) {
-                    lastUrl = dbUrl
-                    trySend(dbUrl).isSuccess
+
+                // ADD THIS MISSING LINE
+                val isCustom = dbUrl != DEFAULT_CHILD_PHOTO_URL
+
+                val finalUrl = when {
+                    isCustom -> dbUrl  // Custom image – no param → fast, cached, no flickering
+                    !isCustom && previousWasCustom -> "${dbUrl}?reset=${System.currentTimeMillis()}"  // Switching from custom → default: one-time fresh param to force Coil to drop broken image
+                    else -> dbUrl  // Normal default – stable URL, perfect caching
                 }
+
+                previousWasCustom = isCustom
+
+                trySend(finalUrl).isSuccess
+                Log.d("🔥", "Photo URL updated for $normalizedKey → $finalUrl")
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (lastUrl != DEFAULT_CHILD_PHOTO_URL) {
-                    lastUrl = DEFAULT_CHILD_PHOTO_URL
-                    trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
-                }
+                trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                Log.e("🔥", "Photo URL listener cancelled for $normalizedKey")
             }
         }
 
         dbRef.addValueEventListener(listener)
 
-        // Periodic verification job - checks for both deletions AND re-uploads
-        val job = viewModelScope.launch {
-            while (coroutineContext.isActive) {
-                delay(15000) // check every 15s - good balance
-                try {
-                    // Get current storage files to detect re-uploads
-                    val storage = FirebaseStorage.getInstance().reference.child("Children Images")
-                    val listResult = storage.listAll().await()
-                    val storageFiles = listResult.items.map { it.name }
-
-                    // Run repair to update URLs if images were re-uploaded
-                    repairAllChildImages(storageFiles)
-
-                    // Also verify current URL still exists (for deleted images)
-                    val snapshot = dbRef.get().await()
-                    val currentUrl = snapshot.getValue(String::class.java).orEmpty()
-                    if (currentUrl.isNotBlank() && currentUrl != DEFAULT_CHILD_PHOTO_URL) {
-                        try {
-                            val storageRef = com.google.firebase.storage.FirebaseStorage
-                                .getInstance()
-                                .getReferenceFromUrl(currentUrl)
-                            storageRef.metadata.await()
-                        } catch (e: Exception) {
-                            // Image was deleted, set to default
-                            if (lastUrl != DEFAULT_CHILD_PHOTO_URL) {
-                                dbRef.setValue(DEFAULT_CHILD_PHOTO_URL).await()
-                                lastUrl = DEFAULT_CHILD_PHOTO_URL
-                                trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
-                            }
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e("🔥", "Photo URL periodic check failed: ${e.message}")
-                }
-            }
-        }
-        
         awaitClose {
             dbRef.removeEventListener(listener)
-            job.cancel()
+            Log.d("🔥", "Photo URL flow closed for $normalizedKey")
         }
     }.distinctUntilChanged()
-
 
     /** Fetch all storage files and repair */
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
