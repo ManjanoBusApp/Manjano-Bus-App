@@ -139,9 +139,7 @@ fun ParentDashboardScreen(
         storage.listAll().addOnSuccessListener { listResult ->
             storageFiles = listResult.items.map { it.name }
             Log.d("ParentDashboard", "✅ Listed ${storageFiles.size} files from Storage")
-
-            // 🧩 Fix photo links in Realtime Database
-            viewModel.fetchAndRepairChildImages(storageFiles)
+            // Repair is now done ONLY once in the ViewModel on startup – we no longer call it from the screen
         }.addOnFailureListener {
             Log.e("ParentDashboard", "❌ Failed to list files from Storage", it)
         }
