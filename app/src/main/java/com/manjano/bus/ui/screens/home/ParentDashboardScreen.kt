@@ -396,12 +396,13 @@ fun ParentDashboardScreen(
                 val painter = rememberAsyncImagePainter(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(childPhotoUrl)
-                        .memoryCacheKey(childPhotoUrl) // stable key
                         .crossfade(true)
                         .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                         .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
                         .build(),
-                    )
+                    placeholder = painterResource(R.drawable.defaultchild),  // shows instantly while loading
+                    error = painterResource(R.drawable.defaultchild)         // immediate fallback if anything fails
+                )
 
                 Image(
                     painter = painter,

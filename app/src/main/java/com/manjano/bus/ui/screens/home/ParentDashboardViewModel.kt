@@ -83,20 +83,25 @@ class ParentDashboardViewModel : ViewModel() {
         childrenRef.addChildEventListener(childrenEventListener)
         fixMismatchedDisplayNamesWithStateFlow()
 
-        // Run repair ONCE on startup, not periodically
+        // Run repair on startup AND every 30 seconds to catch deletions
         viewModelScope.launch {
-            try {
-                val storage = FirebaseStorage.getInstance().reference.child("Children Images")
-                val listResult = suspendCancellableCoroutine { cont ->
-                    storage.listAll()
-                        .addOnSuccessListener { cont.resume(it) }
-                        .addOnFailureListener { cont.resumeWithException(it) }
+            while (isActive) {
+                try {
+                    val storage = FirebaseStorage.getInstance().reference.child("Children Images")
+                    val listResult = suspendCancellableCoroutine { cont ->
+                        storage.listAll()
+                            .addOnSuccessListener { cont.resume(it) }
+                            .addOnFailureListener { cont.resumeWithException(it) }
+                    }
+                    val storageFiles = listResult.items.map { it.name }
+                    repairAllChildImages(storageFiles)
+                    Log.d("🔥", "Storage repair completed, files: ${storageFiles.size}")
+
+                    delay(30000) // Wait 30 seconds before next repair
+                } catch (e: Exception) {
+                    Log.e("🔥", "Storage repair failed: ${e.message}")
+                    delay(10000) // Wait 10 seconds before retry on error
                 }
-                val storageFiles = listResult.items.map { it.name }
-                repairAllChildImages(storageFiles)
-                Log.d("🔥", "Initial storage repair completed, files: ${storageFiles.size}")
-            } catch (e: Exception) {
-                Log.e("🔥", "Initial storage repair failed: ${e.message}")
             }
         }
     }
@@ -425,17 +430,20 @@ class ParentDashboardViewModel : ViewModel() {
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val dbUrl = snapshot.getValue(String::class.java).orEmpty().ifBlank { DEFAULT_CHILD_PHOTO_URL }
-
-                // ADD THIS MISSING LINE
                 val isCustom = dbUrl != DEFAULT_CHILD_PHOTO_URL
 
-                val finalUrl = when {
-                    isCustom -> dbUrl  // Custom image – no param → fast, cached, no flickering
-                    !isCustom && previousWasCustom -> "${dbUrl}?reset=${System.currentTimeMillis()}"  // Switching from custom → default: one-time fresh param to force Coil to drop broken image
-                    else -> dbUrl  // Normal default – stable URL, perfect caching
+                val finalUrl = if (isCustom) {
+                    // We just switched TO a custom image
+                    previousWasCustom = true
+                    dbUrl
+                } else if (previousWasCustom) {
+                    // We just switched FROM custom → default → send cache-buster ONCE
+                    previousWasCustom = false
+                    "${dbUrl}?reset=${System.currentTimeMillis()}"
+                } else {
+                    // Already on default, stay clean
+                    dbUrl
                 }
-
-                previousWasCustom = isCustom
 
                 trySend(finalUrl).isSuccess
                 Log.d("🔥", "Photo URL updated for $normalizedKey → $finalUrl")
