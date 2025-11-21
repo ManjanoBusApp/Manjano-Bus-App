@@ -236,16 +236,10 @@ fun SignupScreen(
         OutlinedTextField(
             value = parentName,
             onValueChange = { newValue ->
-                val filtered = newValue.text.filter { ch -> ch.isLetter() || ch.isWhitespace() }
-                parentName = TextFieldValue(
-                    text = filtered,
-                    selection = TextRange(
-                        start = newValue.selection.start.coerceIn(0, filtered.length),
-                        end = newValue.selection.end.coerceIn(0, filtered.length)
-                    )
+                parentName = newValue.copy(
+                    text = newValue.text.filter { it.isLetter() || it.isWhitespace() }
                 )
             },
-
             placeholder = { Text("Parent's Full Name") },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
@@ -256,14 +250,13 @@ fun SignupScreen(
                 .fillMaxWidth()
                 .focusRequester(parentFocusRequester)
                 .onFocusChanged { focusState ->
-                    if (focusState.isFocused) {
-                        parentError = false
-                    }
+                    if (focusState.isFocused) parentError = false
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
             isError = parentError
         )
+
         if (parentError) Text("Please fill your name", color = Color.Red, fontSize = 12.sp)
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -292,23 +285,14 @@ fun SignupScreen(
 // Column for all child fields
         Column {
             childrenNames.forEachIndexed { index, childName ->
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Child Name TextField
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    val childFocusRequester = remember { FocusRequester() }
                     OutlinedTextField(
                         value = childName,
                         onValueChange = { newValue ->
-                            val filtered =
-                                newValue.text.filter { it.isLetter() || it.isWhitespace() }
+                            val filtered = newValue.text.filter { it.isLetter() || it.isWhitespace() }
                             val updatedChildren = childrenNames.toMutableList()
-                            updatedChildren[index] = TextFieldValue(
-                                text = filtered,
-                                selection = TextRange(
-                                    start = newValue.selection.start.coerceIn(0, filtered.length),
-                                    end = newValue.selection.end.coerceIn(0, filtered.length)
-                                )
-                            )
+                            updatedChildren[index] = newValue.copy(text = filtered)
                             childrenNames = updatedChildren
                         },
                         placeholder = { Text("Child 'First.Middle.Last' Name") },
@@ -318,8 +302,8 @@ fun SignupScreen(
                         ),
                         singleLine = true,
                         modifier = Modifier
-                            .fillMaxWidth() // full width
-                            .focusRequester(remember { FocusRequester() })
+                            .fillMaxWidth()
+                            .focusRequester(childFocusRequester)
                             .onFocusChanged { focusState ->
                                 if (focusState.isFocused) {
                                     val updatedErrors = childErrors.toMutableList()
