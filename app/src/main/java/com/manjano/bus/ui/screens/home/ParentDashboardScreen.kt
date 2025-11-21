@@ -81,7 +81,7 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
-
+import com.google.android.gms.maps.CameraUpdateFactory
 
 data class Child(
     val name: String = "",
@@ -396,12 +396,13 @@ fun ParentDashboardScreen(
                 val painter = rememberAsyncImagePainter(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(childPhotoUrl)
-                        .memoryCacheKey(childPhotoUrl) // stable key
                         .crossfade(true)
                         .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                         .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
                         .build(),
-                    )
+                    placeholder = painterResource(R.drawable.defaultchild),  // shows instantly while loading
+                    error = painterResource(R.drawable.defaultchild)         // immediate fallback if anything fails
+                )
 
                 Image(
                     painter = painter,
@@ -464,10 +465,19 @@ fun ParentDashboardScreen(
                 }
 
                 Spacer(modifier = Modifier.height(uiSizes.verticalSpacing))
-                val busLocation = remember { mutableStateOf(LatLng(-1.2921, 36.8219)) }
+                val busLocation by viewModel.getBusFlow("busLocation").collectAsState()
 
-                val cameraPositionState = rememberCameraPositionState {
-                    position = com.google.android.gms.maps.model.CameraPosition.fromLatLngZoom(busLocation.value, 15f)
+                val cameraPositionState = rememberCameraPositionState()
+
+                LaunchedEffect(busLocation) {
+                    if (busLocation.latitude != -1.2921 || busLocation.longitude != 36.8219) {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngZoom(
+                                busLocation,
+                                15f
+                            )
+                        )
+                    }
                 }
 
                 GoogleMap(
@@ -477,12 +487,11 @@ fun ParentDashboardScreen(
                     cameraPositionState = cameraPositionState
                 ) {
                     Marker(
-                        state = MarkerState(position = busLocation.value),
+                        state = MarkerState(position = busLocation),
                         title = "Bus",
                         snippet = "Current Location"
                     )
                 }
-
 
                 Spacer(modifier = Modifier.height(8.dp)) // small gap from map
 

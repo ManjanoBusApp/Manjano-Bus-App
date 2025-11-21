@@ -1,0 +1,46 @@
+{
+  "rules": {
+    "children": {
+      "$childKey": {
+        ".read": "auth != null && (data.child('userIds').child(auth.uid).val() === true || root.child('admins').child(auth.uid).val() === true)",
+        ".write": "auth != null && (root.child('admins').child(auth.uid).val() === true || data.child('userIds').child(auth.uid).val() === true)",
+        "allowedUserIds": {
+          "$uid": {
+            ".read": "auth != null && (root.child('admins').child(auth.uid).val() === true || data.child('userIds').child(auth.uid).val() === true || root.child('children').child($childKey).child('createdBy').val() === auth.uid)",
+            ".write": "auth != null && (root.child('admins').child(auth.uid).val() === true || root.child('children').child($childKey).child('createdBy').val() === auth.uid)"
+          }
+        },
+        "userIds": {
+          "$uid": {
+            ".read": "auth != null && (root.child('children').child($childKey).child('userIds').child(auth.uid).val() === true || root.child('admins').child(auth.uid).val() === true)",
+            ".write": "auth != null && auth.uid === $uid && (root.child('children').child($childKey).child('allowedUserIds').child(auth.uid).val() === true || root.child('children').child($childKey).child('createdBy').val() === auth.uid || root.child('admins').child(auth.uid).val() === true)"
+          }
+        },
+        "joinRequests": {
+          "$uid": {
+            ".read": "auth != null && (root.child('admins').child(auth.uid).val() === true || root.child('children').child($childKey).child('createdBy').val() === auth.uid)",
+            ".write": "auth != null && auth.uid === $uid"
+          }
+        },
+        "joinAttempts": {
+          ".read": "auth != null && (root.child('admins').child(auth.uid).val() === true || root.child('children').child($childKey).child('createdBy').val() === auth.uid)",
+          ".write": "false"
+        }
+      }
+    },
+    "busLocations": {
+      "$busId": {
+        ".read": true,
+        ".write": true
+      }
+    },
+    "admins": {
+      "$adminUid": {
+        ".read": "auth != null && root.child('admins').child(auth.uid).val() === true",
+        ".write": "auth != null && root.child('admins').child(auth.uid).val() === true"
+      }
+    },
+    ".read": "false",
+    ".write": "false"
+  }
+}
