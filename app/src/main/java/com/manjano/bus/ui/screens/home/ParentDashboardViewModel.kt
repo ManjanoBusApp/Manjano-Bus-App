@@ -44,9 +44,23 @@ class ParentDashboardViewModel : ViewModel() {
     val childrenKeys: StateFlow<List<String>> = _childrenKeys
     private val childrenRef = database.child("children")
 
+    // --- Safely remove only the real Firebase dummy "test" node (never removes real children) ---
     private val childrenEventListener = object : ChildEventListener {
         override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
+
+            // Only delete the exact dummy "test" node created by Firebase SDK
+            // Real children always have data inside (displayName, photoUrl, etc.)
+            if (key.equals("test", ignoreCase = true) && !snapshot.hasChildren() && snapshot.value == null) {
+                snapshot.ref.removeValue()
+                    .addOnSuccessListener { Log.d("🔥", "Firebase dummy 'test' node removed") }
+                    .addOnFailureListener {
+                        Log.e("🔥", "Failed to remove dummy 'test' node – check your security rules: ${it.message}")
+                    }
+                return  // do not add the dummy to the list
+            }
+
+            // This is a real child (like "rtyu" or any proper name)
             val current = _childrenKeys.value.toMutableList()
             if (!current.contains(key)) {
                 current.add(key)
@@ -55,10 +69,8 @@ class ParentDashboardViewModel : ViewModel() {
             }
         }
 
-        override fun onChildChanged(
-            snapshot: DataSnapshot,
-            previousChildName: String?
-        ) { /* no-op */
+        override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+            // no action needed
         }
 
         override fun onChildRemoved(snapshot: DataSnapshot) {
@@ -70,7 +82,8 @@ class ParentDashboardViewModel : ViewModel() {
             }
         }
 
-        override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) { /* ignore */
+        override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {
+            // ignore
         }
 
         override fun onCancelled(error: DatabaseError) {
@@ -115,12 +128,7 @@ class ParentDashboardViewModel : ViewModel() {
                 val lng = snapshot.child("lng").getValue(Double::class.java)
                 if (lat != null && lng != null) {
                     _busLocations.getOrPut(busId) {
-                        MutableStateFlow(
-                            LatLng(
-                                -1.2921,
-                                36.8219
-                            )
-                        )
+                        MutableStateFlow(LatLng(-1.2921, 36.8219))
                     }.value =
                         LatLng(lat, lng)
                 }
@@ -133,7 +141,13 @@ class ParentDashboardViewModel : ViewModel() {
     }
 
     private fun createChildIfMissing(childKey: String, displayName: String) {
-        val ref = database.child("children").child(childKey)
+        val normalizedKey = childKey.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+        if (normalizedKey == "test" || normalizedKey.isBlank()) {
+            Log.d("🔥", "Skipped creating invalid child node: '$childKey'")
+            return
+        }
+
+        val ref = database.child("children").child(normalizedKey)
         ref.get().addOnSuccessListener { snapshot ->
             if (!snapshot.exists()) {
                 val defaultData = mapOf(
@@ -305,7 +319,6 @@ class ParentDashboardViewModel : ViewModel() {
         database.child("children").child(normalizedChild).child("photoUrl").setValue(finalUrl)
     }
 
-
     /** Repair all child images - optimized to avoid unnecessary updates */
     fun repairAllChildImages(storageFiles: List<String>) {
         val normalizedFiles = storageFiles.associateBy {
@@ -313,7 +326,6 @@ class ParentDashboardViewModel : ViewModel() {
         }
 
         database.child("children").get().addOnSuccessListener { snapshot ->
-            // First, collect ALL children and their data
             val childrenToProcess = mutableListOf<Triple<String, String, String>>()
 
             snapshot.children.forEach { childSnap ->
@@ -324,9 +336,7 @@ class ParentDashboardViewModel : ViewModel() {
                 childrenToProcess.add(Triple(normalizedKey, displayName, currentUrl))
             }
 
-            // Now process ALL children with the complete file list
             childrenToProcess.forEach { (normalizedKey, displayName, currentUrl) ->
-                // Check if current custom image still exists in storage
                 val currentFileName = if (currentUrl != DEFAULT_CHILD_PHOTO_URL && currentUrl.isNotBlank()) {
                     currentUrl.substringAfterLast("%2F").substringBefore("?")
                 } else {
@@ -334,17 +344,14 @@ class ParentDashboardViewModel : ViewModel() {
                 }
 
                 val matchedFile = if (currentFileName != null && !storageFiles.contains(currentFileName)) {
-                    null // Set to default image
+                    null
                 } else {
                     findBestImageMatch(normalizedKey, normalizedFiles)
                 }
                 val verifiedUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
                 else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
 
-                // Only update DB if URL has actually changed
-                val shouldUpdate = currentUrl != verifiedUrl
-
-                if (shouldUpdate) {
+                if (currentUrl != verifiedUrl) {
                     database.child("children").child(normalizedKey).child("photoUrl").setValue(verifiedUrl)
                     Log.d("🔥", "✅ Saved '$normalizedKey' with image ${matchedFile ?: "default"}")
                 }
@@ -352,7 +359,6 @@ class ParentDashboardViewModel : ViewModel() {
         }
     }
 
-    /** Smart family matching - works with separated (ati_una_kuja) AND concatenated (atiunakuja) filenames */
     private fun findBestImageMatch(childName: String, normalizedFiles: Map<String, String>): String? {
         val childParts = childName.split("_")
             .filter { it.isNotBlank() }
@@ -369,14 +375,10 @@ class ParentDashboardViewModel : ViewModel() {
             val isConcatenated = imageParts.size == 1 && imageLower.length > 5
             val concatenatedName = if (isConcatenated) imageLower else null
 
-            // Extract full names and initials, handling both separated and concatenated names
             val imageFullNames = imageParts.filter { it.length > 1 }.toSet()
             val imageInitials = if (isConcatenated) {
-                // For concatenated names, extract initials from actual names found in child parts
                 val concatenated = imageParts[0]
                 val foundInitials = mutableSetOf<String>()
-
-                // Check for each child part that's a full name in the concatenated string
                 for (childPart in childParts) {
                     if (childPart.length > 1 && concatenated.contains(childPart)) {
                         foundInitials.add(childPart.first().toString())
@@ -384,7 +386,6 @@ class ParentDashboardViewModel : ViewModel() {
                 }
                 foundInitials
             } else {
-                // For separated names, use normal initial extraction
                 imageFullNames.map { it.first().toString() }.toSet()
             }
             var fullNameMatches = 0
@@ -394,13 +395,9 @@ class ParentDashboardViewModel : ViewModel() {
                 if (part.length > 1) {
                     val normalMatch = imageFullNames.contains(part)
                     val concatMatch = concatenatedName?.contains(part) == true
-                    if (normalMatch || concatMatch) {
-                        fullNameMatches++
-                    }
+                    if (normalMatch || concatMatch) fullNameMatches++
                 } else if (part.length == 1) {
-                    if (imageInitials.contains(part)) {
-                        initialMatches++
-                    }
+                    if (imageInitials.contains(part)) initialMatches++
                 }
             }
 
@@ -408,7 +405,6 @@ class ParentDashboardViewModel : ViewModel() {
                     (fullNameMatches == 2 && initialMatches >= 1) ||
                     (fullNameMatches == 1 && initialMatches >= 2)
 
-// DEBUG LOG — prints ONLY when matching fails (so log stays clean even with 1000+ images)
             if (!rulePassed) {
                 Log.d("🔥", "MATCH FAILED | child: $childName | image: $imageKey | full: $fullNameMatches | init: $initialMatches | initials: $imageInitials | concatenated: $isConcatenated")
             }
@@ -420,31 +416,22 @@ class ParentDashboardViewModel : ViewModel() {
         return null
     }
 
-    /** Observe photoUrl flow - real-time updates only without periodic repair */
     fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
         val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
-
-        var previousWasCustom = false  // Tracks if the last photo was a custom image
+        var previousWasCustom = false
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val dbUrl = snapshot.getValue(String::class.java).orEmpty().ifBlank { DEFAULT_CHILD_PHOTO_URL }
                 val isCustom = dbUrl != DEFAULT_CHILD_PHOTO_URL
-
                 val finalUrl = if (isCustom) {
-                    // We just switched TO a custom image
                     previousWasCustom = true
                     dbUrl
                 } else if (previousWasCustom) {
-                    // We just switched FROM custom → default → send cache-buster ONCE
                     previousWasCustom = false
                     "${dbUrl}?reset=${System.currentTimeMillis()}"
-                } else {
-                    // Already on default, stay clean
-                    dbUrl
-                }
-
+                } else dbUrl
                 trySend(finalUrl).isSuccess
                 Log.d("🔥", "Photo URL updated for $normalizedKey → $finalUrl")
             }
@@ -456,14 +443,9 @@ class ParentDashboardViewModel : ViewModel() {
         }
 
         dbRef.addValueEventListener(listener)
-
-        awaitClose {
-            dbRef.removeEventListener(listener)
-            Log.d("🔥", "Photo URL flow closed for $normalizedKey")
-        }
+        awaitClose { dbRef.removeEventListener(listener) }
     }.distinctUntilChanged()
 
-    /** Fetch all storage files and repair */
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
         viewModelScope.launch { repairAllChildImages(storageFiles) }
     }
@@ -473,4 +455,3 @@ class ParentDashboardViewModel : ViewModel() {
             "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
     }
 }
-
