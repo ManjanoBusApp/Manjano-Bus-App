@@ -60,7 +60,14 @@ class ParentDashboardViewModel : ViewModel() {
         override fun onChildChanged(
             snapshot: DataSnapshot,
             previousChildName: String?
-        ) { /* no-op */
+        ) {
+            val key = snapshot.key ?: return
+            viewModelScope.launch {
+                // Force update the children keys to trigger UI refresh when display names change
+                _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
+                    Log.d("🔥", "childrenEventListener: onChildChanged -> $key")
+                }
+            }
         }
 
         override fun onChildRemoved(snapshot: DataSnapshot) {
@@ -86,6 +93,7 @@ class ParentDashboardViewModel : ViewModel() {
         observeBusLocation()
         childrenRef.addChildEventListener(childrenEventListener)
         fixMismatchedDisplayNamesWithStateFlow()
+        monitorDisplayNameChanges()
 
         // Run repair ONCE on startup, not periodically
         viewModelScope.launch {
@@ -178,17 +186,26 @@ class ParentDashboardViewModel : ViewModel() {
         childrenRef.child(oldKey).get().addOnSuccessListener { snapshot ->
             if (!snapshot.exists()) return@addOnSuccessListener
             val oldData = snapshot.value
+
+            // Copy all data to new node
             childrenRef.child(newKey).setValue(oldData).addOnSuccessListener {
-                viewModelScope.launch {
-                    getEtaFlowByName(newKey)
-                    getDisplayNameFlow(newKey)
-                }
-                viewModelScope.launch {
-                    delay(2000)
-                    childrenRef.child(oldKey).removeValue().addOnSuccessListener {
-                        onRenamed(newKey)
+                // Remove old node immediately
+                childrenRef.child(oldKey).removeValue().addOnSuccessListener {
+                    Log.d("🔥", "Successfully renamed node: $oldKey -> $newKey")
+                    onRenamed(newKey)
+
+                    // Update children keys list
+                    viewModelScope.launch {
+                        _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
+                            remove(oldKey)
+                            if (!contains(newKey)) {
+                                add(newKey)
+                            }
+                        }
                     }
                 }
+            }.addOnFailureListener { error ->
+                Log.e("🔥", "Failed to rename node $oldKey -> $newKey: ${error.message}")
             }
         }
     }
@@ -463,7 +480,54 @@ class ParentDashboardViewModel : ViewModel() {
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
         viewModelScope.launch { repairAllChildImages(storageFiles) }
     }
+    /** Monitor display name changes and rename nodes automatically */
+    private fun monitorDisplayNameChanges() {
+        childrenRef.addChildEventListener(object : ChildEventListener {
+            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
+                // Setup display name listener for this child
+                setupDisplayNameChangeListener(snapshot.key ?: return)
+            }
 
+            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
+                val key = snapshot.key ?: return
+                val newDisplayName = snapshot.child("displayName").getValue(String::class.java)
+
+                if (newDisplayName != null) {
+                    val normalizedNewKey = newDisplayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                    // If display name changed and key doesn't match, rename the node
+                    if (key != normalizedNewKey) {
+                        Log.d("🔥", "Display name changed: $key -> $normalizedNewKey")
+                        renameChildNode(key, normalizedNewKey)
+                    }
+                }
+            }
+
+            override fun onChildRemoved(snapshot: DataSnapshot) {}
+            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {}
+            override fun onCancelled(error: DatabaseError) {}
+        })
+    }
+
+    /** Setup individual display name change listener for a child */
+    private fun setupDisplayNameChangeListener(childKey: String) {
+        val displayNameRef = childrenRef.child(childKey).child("displayName")
+        displayNameRef.addValueEventListener(object : ValueEventListener {
+            override fun onDataChange(snapshot: DataSnapshot) {
+                val newDisplayName = snapshot.getValue(String::class.java) ?: return
+                val normalizedNewKey = newDisplayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+
+                // If current key doesn't match the normalized display name, rename the node
+                if (childKey != normalizedNewKey) {
+                    Log.d("🔥", "Auto-renaming node: $childKey -> $normalizedNewKey")
+                    renameChildNode(childKey, normalizedNewKey)
+                }
+            }
+
+            override fun onCancelled(error: DatabaseError) {
+                Log.e("🔥", "Display name change listener cancelled for $childKey")
+            }
+        })
+    }
     companion object {
         private const val DEFAULT_CHILD_PHOTO_URL =
             "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
