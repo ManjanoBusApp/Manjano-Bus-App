@@ -111,14 +111,14 @@ fun ParentDashboardScreen(
     val selectedStatus = remember { mutableStateOf(initialStatus) }
     val sortedNames = childrenNames.split(",").map { it.trim() }.sorted()
 
-// Create children list once
+// Create children list from all sortedNames
     val children = sortedNames.map { name ->
         Child(
             name = name,
             photoUrl = defaultPhotoUrl,
             status = if (name == sortedNames.firstOrNull()) initialStatus else "On Route"
         )
-    }.distinctBy { it.name }
+    }
 
 // Create selectedChild state once
     val selectedChild = remember {
@@ -243,12 +243,12 @@ fun ParentDashboardScreen(
                     textAlign = TextAlign.Center
                 )
 
-                val childrenKeys by viewModel.childrenKeys.collectAsState()
+                val childrenKeys by viewModel.childrenKeys.collectAsState(initial = emptyList())
                 val sortedChildrenKeys = childrenKeys.sorted()
                 val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
                 val childrenPhotoMap = remember { mutableStateMapOf<String, String>() }
 
-                LaunchedEffect(childrenKeys, storageFiles) {
+                LaunchedEffect(childrenKeys) {  // ← removed storageFiles from keys
                     childrenKeys.forEach { key ->
                         // Collect displayName (existing behavior)
                         scope.launch {
@@ -324,23 +324,17 @@ fun ParentDashboardScreen(
                         onDismissRequest = { childExpanded.value = false },
                         modifier = Modifier.width(uiSizes.dropdownWidth)
                     ) {
-                        childrenKeys.forEach { key ->
-                            val displayName = childrenDisplayMap[key] ?: return@forEach
+                        children.forEach { child ->
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        displayName,
+                                        child.name,
                                         fontSize = if (uiSizes.isTablet) 14.sp else 12.sp,
                                         color = Color.Black
                                     )
                                 },
                                 onClick = {
-                                    // Grab latest photo URL from the live map, fallback to default
-                                    val url = childrenPhotoMap[key]?.takeIf { it.isNotBlank() } ?: selectedChild.value.photoUrl
-                                    selectedChild.value = selectedChild.value.copy(
-                                        name = displayName,
-                                        photoUrl = url
-                                    )
+                                    selectedChild.value = child
                                     childExpanded.value = false
                                 }
                             )
@@ -352,56 +346,49 @@ fun ParentDashboardScreen(
 
                 var etaText by remember { mutableStateOf("Loading...") }
 
-                LaunchedEffect(selectedChild.value.name, storageFiles) {
+                // FIXED: Use the actual Firebase key (not the display name) for ETA and photo
+                LaunchedEffect(selectedChild.value.name) {
+                    if (selectedChild.value.name.isNotEmpty()) {
+                        // Find the real Firebase node key that matches this display name
+                        val realKey = viewModel.childrenKeys.value.find { key ->
+                            val displayName = viewModel.getDisplayNameFlow(key).value
+                            displayName.equals(selectedChild.value.name, ignoreCase = true)
+                        } ?: selectedChild.value.name
 
-                    // --- STATUS FLOW ---
-                    launch {
-                        viewModel.getStatusFlow(selectedChild.value.name)
-                            .collectLatest { status: String ->
-                                selectedStatus.value = status
-                            }
-                    }
-
-                    // --- ETA FLOW ---
-                    launch {
-                        viewModel.getEtaFlowByName(selectedChild.value.name)
-                            .collectLatest { eta: String ->
-                                etaText = eta
-                            }
-                    }
-
-                    // --- PHOTO URL FLOW (FINAL FIX: no flicker + instantly detects deleted OR re-uploaded images) ---
-                    launch {
-                        viewModel.getPhotoUrlFlow(selectedChild.value.name)
-                            .collectLatest { urlFromFlow ->
-                                val finalUrl = if (urlFromFlow.isBlank() || urlFromFlow.contains("defaultchild.png")) {
-                                    defaultPhotoUrl
-                                } else {
-                                    urlFromFlow
-                                }
-
-                                if (selectedChild.value.photoUrl != finalUrl) {
-                                    selectedChild.value = selectedChild.value.copy(photoUrl = finalUrl)
-                                    Log.d("🖼️ SelectedChild", "Photo updated for ${selectedChild.value.name} → $finalUrl")
-                                }
-                            }
+                        viewModel.getEtaFlowByName(realKey).collect { eta ->
+                            etaText = eta
+                        }
                     }
                 }
 
-                Log.d("🖼️ ImageCheck", "Loading image: ${selectedChild.value.photoUrl}")
 
-                // --- CHILD PHOTO ---
-                val childPhotoUrl = selectedChild.value.photoUrl.ifBlank { defaultPhotoUrl }
+                Log.d("ImageCheck", "Loading image for: ${selectedChild.value.name}")
+
+                // FIXED: Same fix for photo – use the real Firebase key
+                val photoUrlFlow = remember(selectedChild.value.name) {
+                    if (selectedChild.value.name.isNotEmpty()) {
+                        val realKey = viewModel.childrenKeys.value.find { key ->
+                            val displayName = viewModel.getDisplayNameFlow(key).value
+                            displayName.equals(selectedChild.value.name, ignoreCase = true)
+                        } ?: selectedChild.value.name
+
+                        viewModel.getPhotoUrlFlow(realKey)
+                    } else {
+                        null
+                    }
+                }
+                val livePhotoUrl by photoUrlFlow?.collectAsState(initial = defaultPhotoUrl)
+                    ?: remember { mutableStateOf(defaultPhotoUrl) }
 
                 val painter = rememberAsyncImagePainter(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(childPhotoUrl)
+                        .data(livePhotoUrl)
                         .crossfade(true)
                         .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                         .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
                         .build(),
-                    placeholder = painterResource(R.drawable.defaultchild),  // shows instantly while loading
-                    error = painterResource(R.drawable.defaultchild)         // immediate fallback if anything fails
+                    placeholder = painterResource(R.drawable.defaultchild),
+                    error = painterResource(R.drawable.defaultchild)
                 )
 
                 Image(

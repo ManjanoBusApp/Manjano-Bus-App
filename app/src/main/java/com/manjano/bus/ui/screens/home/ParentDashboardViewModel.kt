@@ -47,11 +47,13 @@ class ParentDashboardViewModel : ViewModel() {
     private val childrenEventListener = object : ChildEventListener {
         override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
-            val current = _childrenKeys.value.toMutableList()
-            if (!current.contains(key)) {
-                current.add(key)
-                _childrenKeys.value = current
-                Log.d("🔥", "childrenEventListener: onChildAdded -> $key")
+            viewModelScope.launch {
+                _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
+                    if (!contains(key)) {
+                        add(key)
+                        Log.d("🔥", "childrenEventListener: onChildAdded -> $key")
+                    }
+                }
             }
         }
 
@@ -63,10 +65,12 @@ class ParentDashboardViewModel : ViewModel() {
 
         override fun onChildRemoved(snapshot: DataSnapshot) {
             val key = snapshot.key ?: return
-            val current = _childrenKeys.value.toMutableList()
-            if (current.remove(key)) {
-                _childrenKeys.value = current
-                Log.d("🔥", "childrenEventListener: onChildRemoved -> $key")
+            viewModelScope.launch {
+                _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
+                    if (remove(key)) {
+                        Log.d("🔥", "childrenEventListener: onChildRemoved -> $key")
+                    }
+                }
             }
         }
 
