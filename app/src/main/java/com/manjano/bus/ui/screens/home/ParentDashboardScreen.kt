@@ -81,7 +81,7 @@ import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
-
+import com.google.android.gms.maps.CameraUpdateFactory
 
 data class Child(
     val name: String = "",
@@ -111,14 +111,14 @@ fun ParentDashboardScreen(
     val selectedStatus = remember { mutableStateOf(initialStatus) }
     val sortedNames = childrenNames.split(",").map { it.trim() }.sorted()
 
-// Create children list once
+// Create children list from all sortedNames
     val children = sortedNames.map { name ->
         Child(
             name = name,
             photoUrl = defaultPhotoUrl,
             status = if (name == sortedNames.firstOrNull()) initialStatus else "On Route"
         )
-    }.distinctBy { it.name }
+    }
 
 // Create selectedChild state once
     val selectedChild = remember {
@@ -139,9 +139,7 @@ fun ParentDashboardScreen(
         storage.listAll().addOnSuccessListener { listResult ->
             storageFiles = listResult.items.map { it.name }
             Log.d("ParentDashboard", "✅ Listed ${storageFiles.size} files from Storage")
-
-            // 🧩 Fix photo links in Realtime Database
-            viewModel.fetchAndRepairChildImages(storageFiles)
+            // Repair is now done ONLY once in the ViewModel on startup – we no longer call it from the screen
         }.addOnFailureListener {
             Log.e("ParentDashboard", "❌ Failed to list files from Storage", it)
         }
@@ -245,12 +243,12 @@ fun ParentDashboardScreen(
                     textAlign = TextAlign.Center
                 )
 
-                val childrenKeys by viewModel.childrenKeys.collectAsState()
+                val childrenKeys by viewModel.childrenKeys.collectAsState(initial = emptyList())
                 val sortedChildrenKeys = childrenKeys.sorted()
                 val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
                 val childrenPhotoMap = remember { mutableStateMapOf<String, String>() }
 
-                LaunchedEffect(childrenKeys, storageFiles) {
+                LaunchedEffect(childrenKeys) {  // ← removed storageFiles from keys
                     childrenKeys.forEach { key ->
                         // Collect displayName (existing behavior)
                         scope.launch {
@@ -326,27 +324,17 @@ fun ParentDashboardScreen(
                         onDismissRequest = { childExpanded.value = false },
                         modifier = Modifier.width(uiSizes.dropdownWidth)
                     ) {
-                        childrenKeys.forEach { key ->
-                            val displayName = childrenDisplayMap[key] ?: return@forEach
+                        children.forEach { child ->
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        displayName,
+                                        child.name,
                                         fontSize = if (uiSizes.isTablet) 14.sp else 12.sp,
                                         color = Color.Black
                                     )
                                 },
                                 onClick = {
-                                    // Grab latest photo URL from the live map, fallback to default
-                                    val url = childrenPhotoMap[key].takeIf { !it.isNullOrBlank() }
-                                        ?: defaultPhotoUrl
-
-                                    // Update selected child immediately with name + latest url (prevents flicker)
-                                    selectedChild.value = selectedChild.value.copy(
-                                        name = displayName,
-                                        photoUrl = url
-                                    )
-
+                                    selectedChild.value = child
                                     childExpanded.value = false
                                 }
                             )
@@ -358,55 +346,49 @@ fun ParentDashboardScreen(
 
                 var etaText by remember { mutableStateOf("Loading...") }
 
-                LaunchedEffect(selectedChild.value.name, storageFiles) {
+                // FIXED: Use the actual Firebase key (not the display name) for ETA and photo
+                LaunchedEffect(selectedChild.value.name) {
+                    if (selectedChild.value.name.isNotEmpty()) {
+                        // Find the real Firebase node key that matches this display name
+                        val realKey = viewModel.childrenKeys.value.find { key ->
+                            val displayName = viewModel.getDisplayNameFlow(key).value
+                            displayName.equals(selectedChild.value.name, ignoreCase = true)
+                        } ?: selectedChild.value.name
 
-                    // --- STATUS FLOW ---
-                    launch {
-                        viewModel.getStatusFlow(selectedChild.value.name)
-                            .collectLatest { status: String ->
-                                selectedStatus.value = status
-                            }
-                    }
-
-                    // --- ETA FLOW ---
-                    launch {
-                        viewModel.getEtaFlowByName(selectedChild.value.name)
-                            .collectLatest { eta: String ->
-                                etaText = eta
-                            }
-                    }
-
-                    // --- PHOTO URL FLOW (NEW) ---
-                    launch {
-                        viewModel.getPhotoUrlFlow(selectedChild.value.name)
-                            .collectLatest { url ->
-                                val safeUrl = url.ifBlank { defaultPhotoUrl }
-
-                                if (selectedChild.value.photoUrl != safeUrl) {
-                                    selectedChild.value =
-                                        selectedChild.value.copy(photoUrl = safeUrl)
-                                    Log.d(
-                                        "🖼️ SelectedChild",
-                                        "Updated ${selectedChild.value.name} -> $safeUrl"
-                                    )
-                                }
-                            }
+                        viewModel.getEtaFlowByName(realKey).collect { eta ->
+                            etaText = eta
+                        }
                     }
                 }
 
-                Log.d("🖼️ ImageCheck", "Loading image: ${selectedChild.value.photoUrl}")
 
-                // --- CHILD PHOTO ---
-                val childPhotoUrl = selectedChild.value.photoUrl.ifBlank { defaultPhotoUrl }
+                Log.d("ImageCheck", "Loading image for: ${selectedChild.value.name}")
+
+                // FIXED: Same fix for photo – use the real Firebase key
+                val photoUrlFlow = remember(selectedChild.value.name) {
+                    if (selectedChild.value.name.isNotEmpty()) {
+                        val realKey = viewModel.childrenKeys.value.find { key ->
+                            val displayName = viewModel.getDisplayNameFlow(key).value
+                            displayName.equals(selectedChild.value.name, ignoreCase = true)
+                        } ?: selectedChild.value.name
+
+                        viewModel.getPhotoUrlFlow(realKey)
+                    } else {
+                        null
+                    }
+                }
+                val livePhotoUrl by photoUrlFlow?.collectAsState(initial = defaultPhotoUrl)
+                    ?: remember { mutableStateOf(defaultPhotoUrl) }
 
                 val painter = rememberAsyncImagePainter(
                     model = ImageRequest.Builder(LocalContext.current)
-                        .data(childPhotoUrl)
-                        .memoryCacheKey(childPhotoUrl)      // ← ensure Coil keys cache by exact URL
+                        .data(livePhotoUrl)
                         .crossfade(true)
                         .diskCachePolicy(coil.request.CachePolicy.ENABLED)
                         .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
-                        .build()
+                        .build(),
+                    placeholder = painterResource(R.drawable.defaultchild),
+                    error = painterResource(R.drawable.defaultchild)
                 )
 
                 Image(
@@ -470,10 +452,19 @@ fun ParentDashboardScreen(
                 }
 
                 Spacer(modifier = Modifier.height(uiSizes.verticalSpacing))
-                val busLocation = remember { mutableStateOf(LatLng(-1.2921, 36.8219)) }
+                val busLocation by viewModel.getBusFlow("busLocation").collectAsState()
 
-                val cameraPositionState = rememberCameraPositionState {
-                    position = com.google.android.gms.maps.model.CameraPosition.fromLatLngZoom(busLocation.value, 15f)
+                val cameraPositionState = rememberCameraPositionState()
+
+                LaunchedEffect(busLocation) {
+                    if (busLocation.latitude != -1.2921 || busLocation.longitude != 36.8219) {
+                        cameraPositionState.animate(
+                            CameraUpdateFactory.newLatLngZoom(
+                                busLocation,
+                                15f
+                            )
+                        )
+                    }
                 }
 
                 GoogleMap(
@@ -483,12 +474,11 @@ fun ParentDashboardScreen(
                     cameraPositionState = cameraPositionState
                 ) {
                     Marker(
-                        state = MarkerState(position = busLocation.value),
+                        state = MarkerState(position = busLocation),
                         title = "Bus",
                         snippet = "Current Location"
                     )
                 }
-
 
                 Spacer(modifier = Modifier.height(8.dp)) // small gap from map
 
@@ -666,7 +656,7 @@ fun ParentDashboardScreen(
                                 )
                             ) {
                                 Text(
-                                    text = "Enter",
+                                    text = "Send",
                                     color = Color.White,
                                     fontSize = if (uiSizes.isTablet) 14.sp else 12.sp,
                                     fontWeight = FontWeight.Bold

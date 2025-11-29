@@ -236,16 +236,10 @@ fun SignupScreen(
         OutlinedTextField(
             value = parentName,
             onValueChange = { newValue ->
-                val filtered = newValue.text.filter { ch -> ch.isLetter() || ch.isWhitespace() }
-                parentName = TextFieldValue(
-                    text = filtered,
-                    selection = TextRange(
-                        start = newValue.selection.start.coerceIn(0, filtered.length),
-                        end = newValue.selection.end.coerceIn(0, filtered.length)
-                    )
+                parentName = newValue.copy(
+                    text = newValue.text.filter { it.isLetter() || it.isWhitespace() }
                 )
             },
-
             placeholder = { Text("Parent's Full Name") },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
@@ -256,14 +250,13 @@ fun SignupScreen(
                 .fillMaxWidth()
                 .focusRequester(parentFocusRequester)
                 .onFocusChanged { focusState ->
-                    if (focusState.isFocused) {
-                        parentError = false
-                    }
+                    if (focusState.isFocused) parentError = false
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
             isError = parentError
         )
+
         if (parentError) Text("Please fill your name", color = Color.Red, fontSize = 12.sp)
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -292,23 +285,14 @@ fun SignupScreen(
 // Column for all child fields
         Column {
             childrenNames.forEachIndexed { index, childName ->
-                Column(
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    // Child Name TextField
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    val childFocusRequester = remember { FocusRequester() }
                     OutlinedTextField(
                         value = childName,
                         onValueChange = { newValue ->
-                            val filtered =
-                                newValue.text.filter { it.isLetter() || it.isWhitespace() }
+                            val filtered = newValue.text.filter { it.isLetter() || it.isWhitespace() }
                             val updatedChildren = childrenNames.toMutableList()
-                            updatedChildren[index] = TextFieldValue(
-                                text = filtered,
-                                selection = TextRange(
-                                    start = newValue.selection.start.coerceIn(0, filtered.length),
-                                    end = newValue.selection.end.coerceIn(0, filtered.length)
-                                )
-                            )
+                            updatedChildren[index] = newValue.copy(text = filtered)
                             childrenNames = updatedChildren
                         },
                         placeholder = { Text("Child 'First.Middle.Last' Name") },
@@ -318,8 +302,8 @@ fun SignupScreen(
                         ),
                         singleLine = true,
                         modifier = Modifier
-                            .fillMaxWidth() // full width
-                            .focusRequester(remember { FocusRequester() })
+                            .fillMaxWidth()
+                            .focusRequester(childFocusRequester)
                             .onFocusChanged { focusState ->
                                 if (focusState.isFocused) {
                                     val updatedErrors = childErrors.toMutableList()
@@ -603,49 +587,44 @@ fun SignupScreen(
         Button(
             onClick = {
                 parentError = parentName.text.isEmpty()
-                // Validate ALL children names
                 val hasEmptyChild = childrenNames.any { it.text.isEmpty() }
-                childErrors =
-                    childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
+                childErrors = childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
                 studentError = hasEmptyChild
-                emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
-                    .matches()
+                emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text).matches()
                 phoneError = phoneNumber.isEmpty()
 
-                if (!parentError && !studentError && !emailError && !phoneError && uiState.otpDigits.joinToString(
-                        ""
-                    ) == Constants.TEST_OTP
-                ) {
-                    // Save parent + children names
-                    Log.d(
-                        "🔥",
-                        "SignupScreen: Calling saveUserNames with parentName=${parentName.text}, childrenNames=${
-                            childrenNames.joinToString(",") { it.text }
-                        }"
-                    )
-                    signupViewModel.saveUserNames(
-                        parentName.text,
-                        childrenNames.joinToString(",") { it.text },
-                        context
-                    )
-                    // Save names to SharedPreferences for persistence across sessions
+                val enteredOtp = uiState.otpDigits.joinToString("")
+                val isTestOtp = enteredOtp == Constants.TEST_OTP
+
+                if (!parentError && !studentError && !emailError && !phoneError && isTestOtp) {
+                    // TEST OTP → Skip Firebase completely (no more "test" or "connection_check" nodes)
+                    Log.d("🔥", "TEST OTP used – skipping saveUserNames to avoid junk nodes")
+
+                    // Still save locally so the app works exactly the same
                     val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
                     prefs.edit().apply {
                         putString("parent_name", parentName.text)
                         putString("children_names", childrenNames.joinToString(",") { it.text })
                     }.apply()
-                    // Encode names so spaces/special chars don't break the route
-                    val encodedParent =
-                        URLEncoder.encode(parentName.text, StandardCharsets.UTF_8.toString())
+
+                    // Go straight to dashboard
+                    val encodedParent = URLEncoder.encode(parentName.text, StandardCharsets.UTF_8.toString())
                     val encodedChildren = URLEncoder.encode(
                         childrenNames.joinToString(",") { it.text },
                         StandardCharsets.UTF_8.toString()
                     )
-                    val encodedStatus =
-                        URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
+                    val encodedStatus = URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
                     navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
                         popUpTo("signup") { inclusive = true }
                     }
+                }
+                // Real OTP (when you go live) – keep normal flow
+                else if (!parentError && !studentError && !emailError && !phoneError && !isTestOtp && enteredOtp.isNotEmpty()) {
+                    signupViewModel.saveUserNames(
+                        parentName.text,
+                        childrenNames.joinToString(",") { it.text },
+                        context
+                    )
                 }
             },
             enabled = parentName.text.isNotEmpty() &&
