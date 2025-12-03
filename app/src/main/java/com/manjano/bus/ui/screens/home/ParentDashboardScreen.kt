@@ -297,38 +297,56 @@ fun ParentDashboardScreen(
                 }
 
                 // INITIAL LOAD: Auto-Synchronization of selectedChild state
-                LaunchedEffect(childrenDisplayMap, sortedChildrenKeys) {
+                // 1. Add childrenPhotoMap as a dependency to ensure photo changes trigger updates.
+                LaunchedEffect(childrenDisplayMap, childrenPhotoMap, sortedChildrenKeys) {
                     val currentSelectedName = selectedChild.value.name
+
+                    // 1. Identify the key corresponding to the current selection (if any)
                     val currentKey = childrenDisplayMap.entries.find {
                         it.value.equals(currentSelectedName, ignoreCase = true)
                     }?.key
 
-                    // Initial Load (Selected Name is blank) OR Selected Name is Stale (Key is null)
-                    if (currentSelectedName.isEmpty() || currentKey == null) {
+                    val firstAvailableKey = sortedChildrenKeys.firstOrNull()
 
-                        val firstAvailableKey = sortedChildrenKeys.firstOrNull()
+                    // 2. Initial Load Logic: Auto-select immediately as soon as a key is available (blocking condition removed)
+                    if ((currentSelectedName.isEmpty() || currentKey == null) && firstAvailableKey != null) {
 
-                        // Only auto-select if we have keys and the display map is ready
-                        if (firstAvailableKey != null && childrenDisplayMap.containsKey(firstAvailableKey)) {
-                            val newName = childrenDisplayMap[firstAvailableKey] ?: firstAvailableKey
-                            val newPhotoUrl = childrenPhotoMap[firstAvailableKey] ?: defaultPhotoUrl
-
-                            // Prevent infinite loops/unnecessary updates if the selection is already correct
-                            if (!newName.equals(currentSelectedName, ignoreCase = true)) {
-                                Log.d("ParentDashboard", "Auto-selecting/switching child to $newName")
-                                selectedChild.value = selectedChild.value.copy(
-                                    name = newName,
-                                    photoUrl = newPhotoUrl
-                                )
+                        // Use the displayName if it's already loaded, otherwise reconstruct from the key (temporary fallback)
+                        val newName = childrenDisplayMap[firstAvailableKey]
+                            ?: firstAvailableKey.replace("_", " ").let {
+                                // Capitalize each word (like titlecase) for temporary display
+                                it.split(" ").joinToString(" ") { word ->
+                                    word.replaceFirstChar { char -> char.uppercase() }
+                                }
                             }
+
+                        // Get the photo URL. It will be the default until the flow completes, but selection is immediate.
+                        val newPhotoUrl = childrenPhotoMap[firstAvailableKey] ?: defaultPhotoUrl
+
+                        // Only perform the selection if the current name is empty (initial load)
+                        if (currentSelectedName.isEmpty()) {
+                            Log.d("ParentDashboard", "Auto-selecting first child IMMEDIATELY: $newName (key: $firstAvailableKey)")
+                            selectedChild.value = selectedChild.value.copy(
+                                name = newName,
+                                photoUrl = newPhotoUrl
+                            )
                         }
                     }
 
-                    //  Update Photo for the currently selected child
-                    else if (currentKey != null) {
+                    // 3. Keep photo and name in sync if they change later
+                    if (currentKey != null) {
+                        // --- Photo Sync (Image Flash Fix: updates selectedChild when real photo URL arrives) ---
                         val livePhoto = childrenPhotoMap[currentKey] ?: defaultPhotoUrl
                         if (selectedChild.value.photoUrl != livePhoto) {
+                            Log.d("ParentDashboard", "Photo update for ${selectedChild.value.name} → ${livePhoto.substring(0, 30)}...")
                             selectedChild.value = selectedChild.value.copy(photoUrl = livePhoto)
+                        }
+
+                        // --- Name Sync (Updates selectedChild when official displayName arrives) ---
+                        val liveName = childrenDisplayMap[currentKey]
+                        if (liveName != null && selectedChild.value.name != liveName) {
+                            Log.d("ParentDashboard", "Name update for ${currentKey} → $liveName")
+                            selectedChild.value = selectedChild.value.copy(name = liveName)
                         }
                     }
                 }
@@ -403,7 +421,7 @@ fun ParentDashboardScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
-               // ETA text state
+                // ETA text state
                 var etaText by remember { mutableStateOf("Loading...") }
 
                 // FIX C: Determine the realKey based on the currently selected DISPLAY NAME from the live map

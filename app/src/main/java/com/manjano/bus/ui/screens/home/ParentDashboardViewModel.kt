@@ -301,7 +301,7 @@ class ParentDashboardViewModel : ViewModel() {
         Log.d("🔥", "Initialized ${childNames.size} children in Firebase")
     }
 
-        private fun renameChildNode(oldKey: String, newKey: String, onRenamed: (String) -> Unit = {}) {
+    private fun renameChildNode(oldKey: String, newKey: String, onRenamed: (String) -> Unit = {}) {
         childrenRef.child(oldKey).get().addOnSuccessListener { snapshot ->
             if (!snapshot.exists()) return@addOnSuccessListener
             val oldData = snapshot.value
