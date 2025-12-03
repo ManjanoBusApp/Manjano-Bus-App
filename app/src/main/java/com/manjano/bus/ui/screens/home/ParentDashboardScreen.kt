@@ -301,51 +301,52 @@ fun ParentDashboardScreen(
                 LaunchedEffect(childrenDisplayMap, childrenPhotoMap, sortedChildrenKeys) {
                     val currentSelectedName = selectedChild.value.name
 
-                    // 1. Identify the key corresponding to the current selection (if any)
-                    val currentKey = childrenDisplayMap.entries.find {
-                        it.value.equals(currentSelectedName, ignoreCase = true)
-                    }?.key
+                    // CRITICAL FIX: Normalize the selected name to find the correct key
+                    val normalizedSelectedName = if (currentSelectedName.isNotEmpty()) {
+                        currentSelectedName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                    } else ""
+
+                    // Find key by normalized name OR by display name match
+                    val currentKey = sortedChildrenKeys.find { key ->
+                        key == normalizedSelectedName ||
+                                childrenDisplayMap[key]?.equals(currentSelectedName, ignoreCase = true) == true
+                    }
+
+                    // GHOST CLEANUP: If we have a selected name but no matching key, it's a ghost
+                    if (currentSelectedName.isNotEmpty() && currentKey == null) {
+                        Log.d("ParentDashboard", "GHOST DETECTED: Clearing '$currentSelectedName' from UI")
+                        selectedChild.value = Child() // Reset to empty
+                    }
 
                     val firstAvailableKey = sortedChildrenKeys.firstOrNull()
 
-                    // 2. Initial Load Logic: Auto-select immediately as soon as a key is available (blocking condition removed)
-                    if ((currentSelectedName.isEmpty() || currentKey == null) && firstAvailableKey != null) {
-
-                        // Use the displayName if it's already loaded, otherwise reconstruct from the key (temporary fallback)
+                    // Only auto-select if we have no valid selection AND a key is available
+                    if (selectedChild.value.name.isEmpty() && firstAvailableKey != null) {
                         val newName = childrenDisplayMap[firstAvailableKey]
                             ?: firstAvailableKey.replace("_", " ").let {
-                                // Capitalize each word (like titlecase) for temporary display
                                 it.split(" ").joinToString(" ") { word ->
                                     word.replaceFirstChar { char -> char.uppercase() }
                                 }
                             }
 
-                        // Get the photo URL. It will be the default until the flow completes, but selection is immediate.
                         val newPhotoUrl = childrenPhotoMap[firstAvailableKey] ?: defaultPhotoUrl
 
-                        // Only perform the selection if the current name is empty (initial load)
-                        if (currentSelectedName.isEmpty()) {
-                            Log.d("ParentDashboard", "Auto-selecting first child IMMEDIATELY: $newName (key: $firstAvailableKey)")
-                            selectedChild.value = selectedChild.value.copy(
-                                name = newName,
-                                photoUrl = newPhotoUrl
-                            )
-                        }
+                        Log.d("ParentDashboard", "Auto-selecting first child: $newName (key: $firstAvailableKey)")
+                        selectedChild.value = selectedChild.value.copy(
+                            name = newName,
+                            photoUrl = newPhotoUrl
+                        )
                     }
 
-                    // 3. Keep photo and name in sync if they change later
+                    // Keep photo and name in sync if they change later
                     if (currentKey != null) {
-                        // --- Photo Sync (Image Flash Fix: updates selectedChild when real photo URL arrives) ---
                         val livePhoto = childrenPhotoMap[currentKey] ?: defaultPhotoUrl
                         if (selectedChild.value.photoUrl != livePhoto) {
-                            Log.d("ParentDashboard", "Photo update for ${selectedChild.value.name} → ${livePhoto.substring(0, 30)}...")
                             selectedChild.value = selectedChild.value.copy(photoUrl = livePhoto)
                         }
 
-                        // --- Name Sync (Updates selectedChild when official displayName arrives) ---
                         val liveName = childrenDisplayMap[currentKey]
                         if (liveName != null && selectedChild.value.name != liveName) {
-                            Log.d("ParentDashboard", "Name update for ${currentKey} → $liveName")
                             selectedChild.value = selectedChild.value.copy(name = liveName)
                         }
                     }
@@ -424,24 +425,50 @@ fun ParentDashboardScreen(
                 // ETA text state
                 var etaText by remember { mutableStateOf("Loading...") }
 
-                // FIX C: Determine the realKey based on the currently selected DISPLAY NAME from the live map
-                val realKeyForFlows: String? = remember(selectedChild.value.name, childrenDisplayMap) {
-                    val currentSelectedName = selectedChild.value.name
-                    // Search the live map to find the key that matches the current selected display name
-                    childrenDisplayMap.entries.find {
-                        it.value.equals(currentSelectedName, ignoreCase = true)
-                    }?.key
+// FIX: Use the normalized key from childrenKeys that matches the selected child
+                val selectedChildKey: String? = remember(selectedChild.value.name, childrenKeys) {
+                    if (selectedChild.value.name.isEmpty()) return@remember null
+
+                    // Normalize the selected name to match Firebase key format
+                    val normalizedSelectedName = selectedChild.value.name.trim().lowercase()
+                        .replace(Regex("[^a-z0-9]"), "_")
+
+                    // Find the key in childrenKeys that matches this normalized name
+                    childrenKeys.find { key ->
+                        // Compare normalized forms
+                        val normalizedKey = key.lowercase()
+                        normalizedKey == normalizedSelectedName ||
+                                // Also check if any display name matches (from childrenDisplayMap collected earlier)
+                                childrenDisplayMap[key]?.equals(selectedChild.value.name, ignoreCase = true) == true
+                    }
                 }
 
-                // LaunchedEffect to collect ETA flow when the real key is available/changes
-                LaunchedEffect(realKeyForFlows) {
-                    if (realKeyForFlows != null) {
-                        viewModel.getEtaFlowByName(realKeyForFlows).collect { eta ->
+// LaunchedEffect to collect ETA flow when we have a valid key
+                LaunchedEffect(selectedChildKey) {
+                    if (selectedChildKey != null) {
+                        viewModel.getEtaFlowByName(selectedChildKey).collect { eta ->
                             etaText = eta
                         }
-                    } else if (selectedChild.value.name.isNotEmpty()) {
-                        // Only set error/not found if a child name is actively selected but the key is missing
-                        etaText = "Child data not found"
+                    } else {
+                        // Show loading or default message
+                        etaText = "Loading..."
+                    }
+                }
+
+// Also update when childrenDisplayMap updates to catch late arrivals
+                LaunchedEffect(childrenDisplayMap, selectedChild.value.name) {
+                    if (selectedChildKey == null && selectedChild.value.name.isNotEmpty()) {
+                        // Try to find the key one more time when display map updates
+                        val foundKey = childrenDisplayMap.entries.find {
+                            it.value.equals(selectedChild.value.name, ignoreCase = true)
+                        }?.key
+
+                        if (foundKey != null && etaText == "Child data not found") {
+                            // Retry with found key
+                            viewModel.getEtaFlowByName(foundKey).collect { eta ->
+                                etaText = eta
+                            }
+                        }
                     }
                 }
 
