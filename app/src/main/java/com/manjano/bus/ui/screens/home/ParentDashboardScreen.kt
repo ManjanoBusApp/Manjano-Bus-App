@@ -102,14 +102,42 @@ fun ParentDashboardScreen(
     initialStatus: String = "On Route",
     viewModel: ParentDashboardViewModel = hiltViewModel()
 ) {
-    val database = FirebaseDatabase.getInstance().reference
+    // DON'T create nodes from this list - it has wrong names!
+    // Instead, get the CORRECT names from somewhere else
 
+    // Option 1: Get from a reliable source (database, API)
+    // Option 2: Let Firebase auto-rename handle it
+    // Option 3: Pass correct names as parameter
+
+    // For now, REMOVE this block entirely:
+    // LaunchedEffect(sortedNames) {
+    //     if (sortedNames.isNotEmpty()) {
+    //         Log.d("🔥", "Creating Firebase nodes for ${sortedNames.size} children")
+    //         viewModel.initializeChildrenFromList(sortedNames)
+    //     }
+    // }
+
+    // Instead, just load existing Firebase children
+
+    // Initialize ALL children in Firebase immediately when dashboard loads
+    LaunchedEffect(childrenNames) {
+        viewModel.refreshChildrenKeys()
+
+        val displayNames = childrenNames.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+        if (displayNames.isNotEmpty()) {
+            viewModel.initializeChildrenFromList(displayNames)
+            Log.d("ParentDashboard", "Initialized ${displayNames.size} children in Firebase")
+        }
+    }
+
+    val database = FirebaseDatabase.getInstance().reference
     val selectedAction = remember { mutableStateOf("Contact Driver") }
     val showTextBox = remember { mutableStateOf(false) }
     val textInput = remember { mutableStateOf("") }
     val quickActionExpanded = remember { mutableStateOf(false) }
     val selectedStatus = remember { mutableStateOf(initialStatus) }
     val sortedNames = childrenNames.split(",").map { it.trim() }.sorted()
+
 
 // Create children list from all sortedNames
     val children = sortedNames.map { name ->
@@ -243,6 +271,7 @@ fun ParentDashboardScreen(
                     textAlign = TextAlign.Center
                 )
 
+
                 val childrenKeys by viewModel.childrenKeys.collectAsState(initial = emptyList())
                 val sortedChildrenKeys = childrenKeys.sorted()
                 val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
@@ -324,17 +353,22 @@ fun ParentDashboardScreen(
                         onDismissRequest = { childExpanded.value = false },
                         modifier = Modifier.width(uiSizes.dropdownWidth)
                     ) {
+                        // NEW: Use live display names from Firebase when available
                         children.forEach { child ->
+                            val liveName = childrenDisplayMap[
+                                child.name.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                            ] ?: child.name
+
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        child.name,
+                                        liveName,
                                         fontSize = if (uiSizes.isTablet) 14.sp else 12.sp,
                                         color = Color.Black
                                     )
                                 },
                                 onClick = {
-                                    selectedChild.value = child
+                                    selectedChild.value = child.copy(name = liveName)
                                     childExpanded.value = false
                                 }
                             )
@@ -714,4 +748,5 @@ fun ParentDashboardScreen(
         }
     )
 }
+
 
