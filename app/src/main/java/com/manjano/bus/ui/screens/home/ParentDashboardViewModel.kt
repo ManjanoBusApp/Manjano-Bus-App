@@ -93,6 +93,9 @@ class ParentDashboardViewModel : ViewModel() {
         observeBusLocation()
         childrenRef.addChildEventListener(childrenEventListener)
 
+// --- NEW: Load all keys immediately to prevent UI issues and provide live data fast ---
+        loadAllChildrenKeys()
+
         // Run auto-cleanup once on startup (with delay to avoid race conditions)
         viewModelScope.launch {
             delay(5000) // Wait for initial data to load
@@ -305,25 +308,34 @@ class ParentDashboardViewModel : ViewModel() {
 
             // Copy all data to new node
             childrenRef.child(newKey).setValue(oldData).addOnSuccessListener {
-                // Remove old node immediately
-                childrenRef.child(oldKey).removeValue().addOnSuccessListener {
-                    Log.d("🔥", "Successfully renamed node: $oldKey -> $newKey")
-                    onRenamed(newKey)
+                // Remove old node immediately — with error handling and retry
+                childrenRef.child(oldKey).removeValue()
+                    .addOnSuccessListener {
+                        Log.d("🔥", "Successfully deleted old node: $oldKey")
+                        onRenamed(newKey)
 
-                    // PERMANENTLY MARK OLD KEY AS DECOMMISSIONED
-                    database.child("decommissionedKeys").child(oldKey).setValue(true)
+                        // PERMANENTLY MARK OLD KEY AS DECOMMISSIONED
+                        database.child("decommissionedKeys").child(oldKey).setValue(true)
 
-                    // Update children keys list
-                    viewModelScope.launch {
-                        _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
-                            remove(oldKey)
-                            if (!contains(newKey)) {
-                                add(newKey)
+                        // Update children keys list
+                        viewModelScope.launch {
+                            _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
+                                remove(oldKey)
+                                if (!contains(newKey)) add(newKey)
                             }
                         }
                     }
-                }
-
+                    .addOnFailureListener { exception ->
+                        Log.e("🔥", "CRITICAL: Failed to delete old node $oldKey – GHOST NODE WARNING", exception)
+                        // FORCE delete with direct reference (bypass possible listener interference)
+                        database.child("children").child(oldKey).removeValue()
+                            .addOnSuccessListener {
+                                Log.w("🔥", "Force-deleted old node $oldKey after initial failure")
+                            }
+                            .addOnFailureListener { e2 ->
+                                Log.e("🔥", "FINAL FAILURE: Could not delete $oldKey even with force", e2)
+                            }
+                    }
             }.addOnFailureListener { error ->
                 Log.e("🔥", "Failed to rename node $oldKey -> $newKey: ${error.message}")
             }
@@ -347,9 +359,9 @@ class ParentDashboardViewModel : ViewModel() {
         }
     }
 
-    /** Observe ETA updates – no creation, only reading */
-    fun getEtaFlowByName(childName: String): StateFlow<String> {
-        val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+    /** Observe ETA updates – no creation, accepts only the normalized KEY */
+    fun getEtaFlowByName(key: String): StateFlow<String> {
+        // NOTE: The key is expected to be the correct, normalized key (e.g., 'dez_gatesh')
         val etaFlow = MutableStateFlow("Loading...")
 
         val ref = database.child("children").child(key).child("eta")
@@ -368,15 +380,16 @@ class ParentDashboardViewModel : ViewModel() {
         return etaFlow
     }
 
-    /** Observe displayName updates – no creation */
-    fun getDisplayNameFlow(childName: String): StateFlow<String> {
-        val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+    /** Observe displayName updates – no creation, accepts only the normalized KEY */
+    fun getDisplayNameFlow(key: String): StateFlow<String> {
+        // NOTE: The key is expected to be the correct, normalized key (e.g., 'dez_gatesh')
         val nameFlow = MutableStateFlow("Loading...")
 
         val ref = database.child("children").child(key).child("displayName")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val name = snapshot.getValue(String::class.java) ?: childName
+                // If displayName is missing, use the key as a fallback, NOT the static name
+                val name = snapshot.getValue(String::class.java) ?: key
                 if (nameFlow.value != name) nameFlow.value = name
             }
 
@@ -389,9 +402,9 @@ class ParentDashboardViewModel : ViewModel() {
         return nameFlow
     }
 
-    /** Observe child's status – no creation */
-    fun getStatusFlow(childName: String): StateFlow<String> {
-        val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+    /** Observe child's status – no creation, accepts only the normalized KEY */
+    fun getStatusFlow(key: String): StateFlow<String> {
+        // NOTE: No key calculation here, only use the provided key
         val statusFlow = MutableStateFlow("Loading...")
 
         val ref = database.child("children").child(key).child("status")
@@ -410,15 +423,16 @@ class ParentDashboardViewModel : ViewModel() {
         return statusFlow
     }
 
-    /** Update child's status */
-    fun updateChildStatus(childName: String, newStatus: String) {
-        val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+
+    /** Update child's status, accepts only the normalized KEY */
+    fun updateChildStatus(key: String, newStatus: String) {
+        // NOTE: No key calculation here, only use the provided key
         database.child("children").child(key).child("status").setValue(newStatus)
     }
 
-    /** Send quick action message */
-    fun sendQuickActionMessage(childName: String, action: String, message: String) {
-        val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+    /** Send quick action message, accepts only the normalized KEY */
+    fun sendQuickActionMessage(key: String, action: String, message: String) {
+        // NOTE: No key calculation here, only use the provided key
         val messageRef = database.child("children").child(key).child("messages").push()
         val msgData = mapOf(
             "action" to action,
@@ -447,25 +461,36 @@ class ParentDashboardViewModel : ViewModel() {
             it.substringBeforeLast(".").substringAfterLast("/").lowercase().replace(Regex("[^a-z0-9]"), "_")
         }
 
-        database.child("children").get().addOnSuccessListener { snapshot ->
-            // Process each child WITHOUT changing displayName
-            snapshot.children.forEach { childSnap ->
-                val key = childSnap.key ?: return@forEach
-                val displayName = childSnap.child("displayName").getValue(String::class.java)
-                    ?: return@forEach
-                val currentUrl = childSnap.child("photoUrl").getValue(String::class.java).orEmpty()
+        // Fetch decommissioned keys once for quick lookups
+        database.child("decommissionedKeys").get().addOnSuccessListener { decommissionedSnap ->
+            val decommissionedKeys = decommissionedSnap.children.mapNotNull { it.key }.toSet()
 
-                // Use the ACTUAL key, not normalized from displayName
-                val matchedFile = findBestImageMatch(key, normalizedFiles)
-                val verifiedUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
-                else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
+            database.child("children").get().addOnSuccessListener { snapshot ->
+                // Process each child WITHOUT changing displayName
+                snapshot.children.forEach { childSnap ->
+                    val key = childSnap.key ?: return@forEach
+                    // CRITICAL GUARDRAIL: Skip if this key has been decommissioned
+                    if (decommissionedKeys.contains(key)) {
+                        Log.w("🔥", "Skipping photo repair for decommissioned key: $key")
+                        return@forEach
+                    }
 
-                // Only update photoUrl, NEVER displayName
-                val shouldUpdate = currentUrl != verifiedUrl
+                    val displayName = childSnap.child("displayName").getValue(String::class.java)
+                        ?: return@forEach
+                    val currentUrl = childSnap.child("photoUrl").getValue(String::class.java).orEmpty()
 
-                if (shouldUpdate) {
-                    database.child("children").child(key).child("photoUrl").setValue(verifiedUrl)
-                    Log.d("🔥", "✅ Updated photo for '$key' (displayName: '$displayName') → ${matchedFile ?: "default"}")
+                    // Use the ACTUAL key, not normalized from displayName
+                    val matchedFile = findBestImageMatch(key, normalizedFiles)
+                    val verifiedUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
+                    else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
+
+                    // Only update photoUrl, NEVER displayName
+                    val shouldUpdate = currentUrl != verifiedUrl
+
+                    if (shouldUpdate) {
+                        database.child("children").child(key).child("photoUrl").setValue(verifiedUrl)
+                        Log.d("🔥", "✅ Updated photo for '$key' (displayName: '$displayName') → ${matchedFile ?: "default"}")
+                    }
                 }
             }
         }
@@ -539,47 +564,29 @@ class ParentDashboardViewModel : ViewModel() {
         return null
     }
 
-    /** Observe photoUrl flow - with immediate initial load (no default flash) */
-    fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
-        val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-
-        val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
-
-        var previousWasCustom = false
-
-        // Immediate read – no creation
-        try {
-            val snapshot = dbRef.get().await()
-            val initialUrl = snapshot.getValue(String::class.java) ?: DEFAULT_CHILD_PHOTO_URL
-            previousWasCustom = initialUrl != DEFAULT_CHILD_PHOTO_URL
-            trySend(initialUrl).isSuccess
-        } catch (e: Exception) {
-            trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
-        }
+    /** Observe photoUrl flow - purely observational, no creation, no initial await() */
+    fun getPhotoUrlFlow(key: String): StateFlow<String> {
+        // NOTE: The key is already expected to be normalized and correct from the UI/childrenKeys
+        val photoFlow = MutableStateFlow(DEFAULT_CHILD_PHOTO_URL)
+        val dbRef = database.child("children").child(key).child("photoUrl")
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val dbUrl = snapshot.getValue(String::class.java) ?: DEFAULT_CHILD_PHOTO_URL
-                val isCustom = dbUrl != DEFAULT_CHILD_PHOTO_URL
-
-                val finalUrl = when {
-                    isCustom -> dbUrl
-                    !isCustom && previousWasCustom -> "${dbUrl}?reset=${System.currentTimeMillis()}"
-                    else -> dbUrl
+                if (photoFlow.value != dbUrl) {
+                    photoFlow.value = dbUrl
                 }
-
-                previousWasCustom = isCustom
-                trySend(finalUrl).isSuccess
             }
 
             override fun onCancelled(error: DatabaseError) {
-                trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+                photoFlow.value = DEFAULT_CHILD_PHOTO_URL
             }
         }
 
         dbRef.addValueEventListener(listener)
-        awaitClose { dbRef.removeEventListener(listener) }
-    }.distinctUntilChanged()
+        addCloseableListener(dbRef, listener)
+        return photoFlow
+    }
 
     /** Fetch all storage files and repair */
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
