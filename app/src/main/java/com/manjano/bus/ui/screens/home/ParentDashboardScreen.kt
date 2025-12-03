@@ -278,17 +278,11 @@ fun ParentDashboardScreen(
                 val childrenPhotoMap = remember { mutableStateMapOf<String, String>() }
 
                 LaunchedEffect(childrenKeys) {
-                    // Only start flows for keys that actually exist right now in Firebase
-                    // This prevents calling getDisplayNameFlow / getPhotoUrlFlow on old/deleted keys
-                    // → createChildIfMissing is never called for ghost nodes → no resurrection
                     childrenKeys.forEach { key ->
                         scope.launch {
                             viewModel.getDisplayNameFlow(key).collect { displayName ->
                                 if (displayName != "Loading...") {
                                     childrenDisplayMap[key] = displayName
-                                    if (selectedChild.value.name.trim().lowercase() == key) {
-                                        selectedChild.value = selectedChild.value.copy(name = displayName)
-                                    }
                                 }
                             }
                         }
@@ -296,13 +290,45 @@ fun ParentDashboardScreen(
                         scope.launch {
                             viewModel.getPhotoUrlFlow(key).collect { url ->
                                 val safeUrl = url.ifBlank { defaultPhotoUrl }
-                                if (childrenPhotoMap[key] != safeUrl) {
-                                    childrenPhotoMap[key] = safeUrl
-                                    if (selectedChild.value.name.trim().lowercase() == key) {
-                                        selectedChild.value = selectedChild.value.copy(photoUrl = safeUrl)
-                                    }
-                                }
+                                childrenPhotoMap[key] = safeUrl
                             }
+                        }
+                    }
+                }
+
+                // INITIAL LOAD: Auto-Synchronization of selectedChild state
+                LaunchedEffect(childrenDisplayMap, sortedChildrenKeys) {
+                    val currentSelectedName = selectedChild.value.name
+                    val currentKey = childrenDisplayMap.entries.find {
+                        it.value.equals(currentSelectedName, ignoreCase = true)
+                    }?.key
+
+                    // Initial Load (Selected Name is blank) OR Selected Name is Stale (Key is null)
+                    if (currentSelectedName.isEmpty() || currentKey == null) {
+
+                        val firstAvailableKey = sortedChildrenKeys.firstOrNull()
+
+                        // Only auto-select if we have keys and the display map is ready
+                        if (firstAvailableKey != null && childrenDisplayMap.containsKey(firstAvailableKey)) {
+                            val newName = childrenDisplayMap[firstAvailableKey] ?: firstAvailableKey
+                            val newPhotoUrl = childrenPhotoMap[firstAvailableKey] ?: defaultPhotoUrl
+
+                            // Prevent infinite loops/unnecessary updates if the selection is already correct
+                            if (!newName.equals(currentSelectedName, ignoreCase = true)) {
+                                Log.d("ParentDashboard", "Auto-selecting/switching child to $newName")
+                                selectedChild.value = selectedChild.value.copy(
+                                    name = newName,
+                                    photoUrl = newPhotoUrl
+                                )
+                            }
+                        }
+                    }
+
+                    //  Update Photo for the currently selected child
+                    else if (currentKey != null) {
+                        val livePhoto = childrenPhotoMap[currentKey] ?: defaultPhotoUrl
+                        if (selectedChild.value.photoUrl != livePhoto) {
+                            selectedChild.value = selectedChild.value.copy(photoUrl = livePhoto)
                         }
                     }
                 }
@@ -347,11 +373,10 @@ fun ParentDashboardScreen(
                         onDismissRequest = { childExpanded.value = false },
                         modifier = Modifier.width(uiSizes.dropdownWidth)
                     ) {
-                        // NEW: Use live display names from Firebase when available
-                        children.forEach { child ->
-                            val liveName = childrenDisplayMap[
-                                child.name.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-                            ] ?: child.name
+                        // FIX A: Loop over live keys and use display map for names/photos
+                        sortedChildrenKeys.forEach { key ->
+                            val liveName = childrenDisplayMap[key] ?: key // Fallback to key
+                            val livePhotoUrl = childrenPhotoMap[key] ?: defaultPhotoUrl
 
                             DropdownMenuItem(
                                 text = {
@@ -362,7 +387,11 @@ fun ParentDashboardScreen(
                                     )
                                 },
                                 onClick = {
-                                    selectedChild.value = child.copy(name = liveName)
+                                    // Update selectedChild with the live name and photo from the map
+                                    selectedChild.value = selectedChild.value.copy(
+                                        name = liveName,
+                                        photoUrl = livePhotoUrl
+                                    )
                                     childExpanded.value = false
                                 }
                             )
@@ -372,42 +401,36 @@ fun ParentDashboardScreen(
 
                 Spacer(modifier = Modifier.height(12.dp))
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+               // ETA text state
                 var etaText by remember { mutableStateOf("Loading...") }
 
-                // FIXED: Use the actual Firebase key (not the display name) for ETA and photo
-                LaunchedEffect(selectedChild.value.name) {
-                    if (selectedChild.value.name.isNotEmpty()) {
-                        // Find the real Firebase node key that matches this display name
-                        val realKey = viewModel.childrenKeys.value.find { key ->
-                            val displayName = viewModel.getDisplayNameFlow(key).value
-                            displayName.equals(selectedChild.value.name, ignoreCase = true)
-                        } ?: selectedChild.value.name
-
-                        viewModel.getEtaFlowByName(realKey).collect { eta ->
-                            etaText = eta
-                        }
-                    }
+                // FIX C: Determine the realKey based on the currently selected DISPLAY NAME from the live map
+                val realKeyForFlows: String? = remember(selectedChild.value.name, childrenDisplayMap) {
+                    val currentSelectedName = selectedChild.value.name
+                    // Search the live map to find the key that matches the current selected display name
+                    childrenDisplayMap.entries.find {
+                        it.value.equals(currentSelectedName, ignoreCase = true)
+                    }?.key
                 }
 
+                // LaunchedEffect to collect ETA flow when the real key is available/changes
+                LaunchedEffect(realKeyForFlows) {
+                    if (realKeyForFlows != null) {
+                        viewModel.getEtaFlowByName(realKeyForFlows).collect { eta ->
+                            etaText = eta
+                        }
+                    } else if (selectedChild.value.name.isNotEmpty()) {
+                        // Only set error/not found if a child name is actively selected but the key is missing
+                        etaText = "Child data not found"
+                    }
+                }
 
                 Log.d("ImageCheck", "Loading image for: ${selectedChild.value.name}")
 
-                // FIXED: Same fix for photo – use the real Firebase key
-                val photoUrlFlow = remember(selectedChild.value.name) {
-                    if (selectedChild.value.name.isNotEmpty()) {
-                        val realKey = viewModel.childrenKeys.value.find { key ->
-                            val displayName = viewModel.getDisplayNameFlow(key).value
-                            displayName.equals(selectedChild.value.name, ignoreCase = true)
-                        } ?: selectedChild.value.name
-
-                        viewModel.getPhotoUrlFlow(realKey)
-                    } else {
-                        null
-                    }
-                }
-                val livePhotoUrl by photoUrlFlow?.collectAsState(initial = defaultPhotoUrl)
-                    ?: remember { mutableStateOf(defaultPhotoUrl) }
-
+                // Photo URL is still managed by the selectedChild state (updated by Fix B)
+                val livePhotoUrl = selectedChild.value.photoUrl
                 val painter = rememberAsyncImagePainter(
                     model = ImageRequest.Builder(LocalContext.current)
                         .data(livePhotoUrl)
