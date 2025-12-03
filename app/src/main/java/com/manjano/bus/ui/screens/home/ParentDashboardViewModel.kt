@@ -257,24 +257,34 @@ class ParentDashboardViewModel : ViewModel() {
         }
     }
     private fun createChildIfMissing(childKey: String, displayName: String) {
-        val ref = database.child("children").child(childKey)
-        ref.get().addOnSuccessListener { snapshot ->
-            if (!snapshot.exists()) {
-                val defaultData = mapOf(
-                    "displayName" to displayName,
-                    "eta" to "Arriving in 5 minutes",
-                    "status" to "On Route",
-                    "messages" to emptyMap<String, Any>(),
-                    "photoUrl" to DEFAULT_CHILD_PHOTO_URL
-                )
-                ref.updateChildren(defaultData)
-            } else {
-                val updates = mutableMapOf<String, Any>()
-                if (!snapshot.hasChild("displayName")) updates["displayName"] = displayName
-                if (!snapshot.hasChild("status")) updates["status"] = "On Route"
-                if (!snapshot.hasChild("messages")) updates["messages"] = emptyMap<String, Any>()
-                if (!snapshot.hasChild("photoUrl")) updates["photoUrl"] = DEFAULT_CHILD_PHOTO_URL
-                if (updates.isNotEmpty()) ref.updateChildren(updates)
+        // BLOCK RESURRECTION: Never recreate a key that has been officially decommissioned
+        val decommissionedRef = database.child("decommissionedKeys").child(childKey)
+        decommissionedRef.get().addOnSuccessListener { snapshot ->
+            if (snapshot.exists()) {
+                Log.d("🔥", "BLOCKED resurrection of decommissioned key: $childKey")
+                return@addOnSuccessListener
+            }
+
+            // Safe to proceed — key has never been renamed away
+            val ref = database.child("children").child(childKey)
+            ref.get().addOnSuccessListener { childSnapshot ->
+                if (!childSnapshot.exists()) {
+                    val defaultData = mapOf(
+                        "displayName" to displayName,
+                        "eta" to "Arriving in 5 minutes",
+                        "status" to "On Route",
+                        "messages" to emptyMap<String, Any>(),
+                        "photoUrl" to DEFAULT_CHILD_PHOTO_URL
+                    )
+                    ref.updateChildren(defaultData)
+                } else {
+                    val updates = mutableMapOf<String, Any>()
+                    if (!childSnapshot.hasChild("displayName")) updates["displayName"] = displayName
+                    if (!childSnapshot.hasChild("status")) updates["status"] = "On Route"
+                    if (!childSnapshot.hasChild("messages")) updates["messages"] = emptyMap<String, Any>()
+                    if (!childSnapshot.hasChild("photoUrl")) updates["photoUrl"] = DEFAULT_CHILD_PHOTO_URL
+                    if (updates.isNotEmpty()) ref.updateChildren(updates)
+                }
             }
         }
     }
@@ -300,6 +310,9 @@ class ParentDashboardViewModel : ViewModel() {
                     Log.d("🔥", "Successfully renamed node: $oldKey -> $newKey")
                     onRenamed(newKey)
 
+                    // PERMANENTLY MARK OLD KEY AS DECOMMISSIONED
+                    database.child("decommissionedKeys").child(oldKey).setValue(true)
+
                     // Update children keys list
                     viewModelScope.launch {
                         _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
@@ -310,6 +323,7 @@ class ParentDashboardViewModel : ViewModel() {
                         }
                     }
                 }
+
             }.addOnFailureListener { error ->
                 Log.e("🔥", "Failed to rename node $oldKey -> $newKey: ${error.message}")
             }
@@ -333,14 +347,10 @@ class ParentDashboardViewModel : ViewModel() {
         }
     }
 
-    /** Observe ETA updates */
+    /** Observe ETA updates – no creation, only reading */
     fun getEtaFlowByName(childName: String): StateFlow<String> {
         val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val etaFlow = MutableStateFlow("Loading...")
-        createChildIfMissing(key, childName)
-
-        // CREATE the child node if missing - THIS IS THE CRITICAL FIX
-        createChildIfMissing(key, childName)
 
         val ref = database.child("children").child(key).child("eta")
         val listener = object : ValueEventListener {
@@ -350,7 +360,7 @@ class ParentDashboardViewModel : ViewModel() {
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (etaFlow.value != "Error loading ETA") etaFlow.value = "Error loading ETA"
+                etaFlow.value = "Error loading ETA"
             }
         }
         ref.addValueEventListener(listener)
@@ -358,10 +368,11 @@ class ParentDashboardViewModel : ViewModel() {
         return etaFlow
     }
 
-    /** Observe displayName updates */
+    /** Observe displayName updates – no creation */
     fun getDisplayNameFlow(childName: String): StateFlow<String> {
         val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val nameFlow = MutableStateFlow("Loading...")
+
         val ref = database.child("children").child(key).child("displayName")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
@@ -370,7 +381,7 @@ class ParentDashboardViewModel : ViewModel() {
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (nameFlow.value != "Error loading name") nameFlow.value = "Error loading name"
+                nameFlow.value = "Error loading name"
             }
         }
         ref.addValueEventListener(listener)
@@ -378,10 +389,11 @@ class ParentDashboardViewModel : ViewModel() {
         return nameFlow
     }
 
-    /** Observe child's status */
+    /** Observe child's status – no creation */
     fun getStatusFlow(childName: String): StateFlow<String> {
         val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
         val statusFlow = MutableStateFlow("Loading...")
+
         val ref = database.child("children").child(key).child("status")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
@@ -390,8 +402,7 @@ class ParentDashboardViewModel : ViewModel() {
             }
 
             override fun onCancelled(error: DatabaseError) {
-                if (statusFlow.value != "Error loading status") statusFlow.value =
-                    "Error loading status"
+                statusFlow.value = "Error loading status"
             }
         }
         ref.addValueEventListener(listener)
@@ -528,22 +539,27 @@ class ParentDashboardViewModel : ViewModel() {
         return null
     }
 
-    /** Observe photoUrl flow - with fallback for missing nodes */
+    /** Observe photoUrl flow - with immediate initial load (no default flash) */
     fun getPhotoUrlFlow(childName: String) = callbackFlow<String> {
         val normalizedKey = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-
-        // Ensure child exists first
-        createChildIfMissing(normalizedKey, childName)
 
         val dbRef = database.child("children").child(normalizedKey).child("photoUrl")
 
         var previousWasCustom = false
 
+        // Immediate read – no creation
+        try {
+            val snapshot = dbRef.get().await()
+            val initialUrl = snapshot.getValue(String::class.java) ?: DEFAULT_CHILD_PHOTO_URL
+            previousWasCustom = initialUrl != DEFAULT_CHILD_PHOTO_URL
+            trySend(initialUrl).isSuccess
+        } catch (e: Exception) {
+            trySend(DEFAULT_CHILD_PHOTO_URL).isSuccess
+        }
+
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val dbUrl = snapshot.getValue(String::class.java)
-                    ?: DEFAULT_CHILD_PHOTO_URL // Use default if null
-
+                val dbUrl = snapshot.getValue(String::class.java) ?: DEFAULT_CHILD_PHOTO_URL
                 val isCustom = dbUrl != DEFAULT_CHILD_PHOTO_URL
 
                 val finalUrl = when {

@@ -277,17 +277,17 @@ fun ParentDashboardScreen(
                 val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
                 val childrenPhotoMap = remember { mutableStateMapOf<String, String>() }
 
-                LaunchedEffect(childrenKeys) {  // ← removed storageFiles from keys
+                LaunchedEffect(childrenKeys) {
+                    // Only start flows for keys that actually exist right now in Firebase
+                    // This prevents calling getDisplayNameFlow / getPhotoUrlFlow on old/deleted keys
+                    // → createChildIfMissing is never called for ghost nodes → no resurrection
                     childrenKeys.forEach { key ->
-                        // Collect displayName (existing behavior)
                         scope.launch {
                             viewModel.getDisplayNameFlow(key).collect { displayName ->
                                 if (displayName != "Loading...") {
                                     childrenDisplayMap[key] = displayName
-                                    // If currently selected child matches this key, update its display name
                                     if (selectedChild.value.name.trim().lowercase() == key) {
-                                        selectedChild.value =
-                                            selectedChild.value.copy(name = displayName)
+                                        selectedChild.value = selectedChild.value.copy(name = displayName)
                                     }
                                 }
                             }
@@ -296,16 +296,10 @@ fun ParentDashboardScreen(
                         scope.launch {
                             viewModel.getPhotoUrlFlow(key).collect { url ->
                                 val safeUrl = url.ifBlank { defaultPhotoUrl }
-
                                 if (childrenPhotoMap[key] != safeUrl) {
                                     childrenPhotoMap[key] = safeUrl
-                                    Log.d("🖼️ childrenPhotoMap", "Updated $key -> $safeUrl")
-
-                                    val selectedKey = selectedChild.value.name.trim().lowercase()
-                                    if (selectedKey == key) {
-                                        // immediate UI update for selected child
-                                        selectedChild.value =
-                                            selectedChild.value.copy(photoUrl = safeUrl)
+                                    if (selectedChild.value.name.trim().lowercase() == key) {
+                                        selectedChild.value = selectedChild.value.copy(photoUrl = safeUrl)
                                     }
                                 }
                             }
