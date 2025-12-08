@@ -82,6 +82,8 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
 
 data class Child(
     val name: String = "",
@@ -401,9 +403,7 @@ fun ParentDashboardScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Spacer(modifier = Modifier.height(12.dp))
+               Spacer(modifier = Modifier.height(12.dp))
 
                 // ETA text state
                 var etaText by remember { mutableStateOf("Loading...") }
@@ -528,35 +528,43 @@ fun ParentDashboardScreen(
                 }
 
                 Spacer(modifier = Modifier.height(uiSizes.verticalSpacing))
-                val busLocation by viewModel.getBusFlow("busLocation").collectAsState()
 
-                val cameraPositionState = rememberCameraPositionState()
+// Live bus location from Firebase (real-time)
+                val busLocation by viewModel.getBusFlow("busLocation").collectAsState(initial = LatLng(-1.2921, 36.8219))
 
+// Initial position set immediately (uses GMS CameraPosition import)
+                val cameraPositionState = rememberCameraPositionState {
+                    position = CameraPosition.fromLatLngZoom(busLocation, 15f)
+                }
+
+// Automatically follow the bus when location changes
                 LaunchedEffect(busLocation) {
-                    if (busLocation.latitude != -1.2921 || busLocation.longitude != 36.8219) {
-                        cameraPositionState.animate(
-                            CameraUpdateFactory.newLatLngZoom(
-                                busLocation,
-                                15f
-                            )
-                        )
-                    }
+                    cameraPositionState.animate(
+                        CameraUpdateFactory.newLatLngZoom(busLocation, 15f),
+                        1000  // durationMs is optional; this works in v4.4.1
+                    )
                 }
 
                 GoogleMap(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(uiSizes.mapHeight),
+                        .height(uiSizes.mapHeight)
+                        .clip(RoundedCornerShape(12.dp)),
                     cameraPositionState = cameraPositionState
+                    // Temporarily comment these out as their imports were deleted
+                    // properties = MapProperties(isMyLocationEnabled = false),
+                    // uiSettings = MapUiSettings(zoomControlsEnabled = false, compassEnabled = true)
                 ) {
                     Marker(
                         state = MarkerState(position = busLocation),
-                        title = "Bus",
-                        snippet = "Current Location"
+                        title = "School Bus",
+                        snippet = "Live Location",
+                        // Direct GMS BitmapDescriptor for green icon (no rememberMarkerIcon needed)
+                        icon = BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_GREEN)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp)) // small gap from map
+              Spacer(modifier = Modifier.height(8.dp)) // small gap from map
 
                 Box(
                     modifier = Modifier
