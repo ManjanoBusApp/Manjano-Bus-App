@@ -566,9 +566,16 @@ class ParentDashboardViewModel : ViewModel() {
 
     /** Observe photoUrl flow - purely observational, no creation, no initial await() */
     fun getPhotoUrlFlow(key: String): StateFlow<String> {
-        // NOTE: The key is already expected to be normalized and correct from the UI/childrenKeys
         val photoFlow = MutableStateFlow(DEFAULT_CHILD_PHOTO_URL)
         val dbRef = database.child("children").child(key).child("photoUrl")
+
+        // CRITICAL: Read the CURRENT value first
+        dbRef.get().addOnSuccessListener { snapshot ->
+            val currentUrl = snapshot.getValue(String::class.java) ?: DEFAULT_CHILD_PHOTO_URL
+            viewModelScope.launch {
+                photoFlow.value = currentUrl
+            }
+        }
 
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
@@ -587,6 +594,7 @@ class ParentDashboardViewModel : ViewModel() {
         addCloseableListener(dbRef, listener)
         return photoFlow
     }
+
 
     /** Fetch all storage files and repair */
     fun fetchAndRepairChildImages(storageFiles: List<String>) {

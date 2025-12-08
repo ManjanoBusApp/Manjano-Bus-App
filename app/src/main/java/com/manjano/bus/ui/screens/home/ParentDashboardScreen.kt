@@ -139,19 +139,15 @@ fun ParentDashboardScreen(
     val sortedNames = childrenNames.split(",").map { it.trim() }.sorted()
 
 
-// Create children list from all sortedNames
-    val children = sortedNames.map { name ->
-        Child(
-            name = name,
-            photoUrl = defaultPhotoUrl,
-            status = if (name == sortedNames.firstOrNull()) initialStatus else "On Route"
-        )
-    }
-
 // Create selectedChild state once
     val selectedChild = remember {
+        // Initialize with an empty name, relying 100% on Firebase data (childrenKeys) to populate it.
         mutableStateOf(
-            children.firstOrNull() ?: Child("", defaultPhotoUrl, "On Route")
+            Child(
+                name = "",
+                photoUrl = defaultPhotoUrl,
+                status = initialStatus
+            )
         )
     }
 
@@ -289,66 +285,53 @@ fun ParentDashboardScreen(
 
                         scope.launch {
                             viewModel.getPhotoUrlFlow(key).collect { url ->
-                                val safeUrl = url.ifBlank { defaultPhotoUrl }
-                                childrenPhotoMap[key] = safeUrl
+                                // This fixes the race where the initial URL is emitted first and blocks the real URL update
+                                childrenPhotoMap[key] = if (url.isBlank()) defaultPhotoUrl else url
                             }
                         }
                     }
                 }
 
-                // INITIAL LOAD: Auto-Synchronization of selectedChild state
-                // 1. Add childrenPhotoMap as a dependency to ensure photo changes trigger updates.
-                LaunchedEffect(childrenDisplayMap, childrenPhotoMap, sortedChildrenKeys) {
-                    val currentSelectedName = selectedChild.value.name
 
-                    // CRITICAL FIX: Normalize the selected name to find the correct key
-                    val normalizedSelectedName = if (currentSelectedName.isNotEmpty()) {
-                        currentSelectedName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-                    } else ""
+                // Sync selected child with live Firebase data (name + photo) instantly
+                LaunchedEffect(sortedChildrenKeys, childrenDisplayMap.entries, childrenPhotoMap.entries) {
+                    val currentName = selectedChild.value.name
+                    val currentPhotoUrl = selectedChild.value.photoUrl
 
-                    // Find key by normalized name OR by display name match
-                    val currentKey = sortedChildrenKeys.find { key ->
-                        key == normalizedSelectedName ||
-                                childrenDisplayMap[key]?.equals(currentSelectedName, ignoreCase = true) == true
-                    }
+                    // Decide which child should be shown: current one (if valid) → otherwise first available
+                    val targetKey = sortedChildrenKeys.find { key ->
+                        val normalized = currentName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                        key == normalized || childrenDisplayMap[key]?.equals(currentName, ignoreCase = true) == true
+                    } ?: sortedChildrenKeys.firstOrNull()
 
-                    // GHOST CLEANUP: If we have a selected name but no matching key, it's a ghost
-                    if (currentSelectedName.isNotEmpty() && currentKey == null) {
-                        Log.d("ParentDashboard", "GHOST DETECTED: Clearing '$currentSelectedName' from UI")
-                        selectedChild.value = Child() // Reset to empty
-                    }
-
-                    val firstAvailableKey = sortedChildrenKeys.firstOrNull()
-
-                    // Only auto-select if we have no valid selection AND a key is available
-                    if (selectedChild.value.name.isEmpty() && firstAvailableKey != null) {
-                        val newName = childrenDisplayMap[firstAvailableKey]
-                            ?: firstAvailableKey.replace("_", " ").let {
-                                it.split(" ").joinToString(" ") { word ->
-                                    word.replaceFirstChar { char -> char.uppercase() }
-                                }
-                            }
-
-                        val newPhotoUrl = childrenPhotoMap[firstAvailableKey] ?: defaultPhotoUrl
-
-                        Log.d("ParentDashboard", "Auto-selecting first child: $newName (key: $firstAvailableKey)")
-                        selectedChild.value = selectedChild.value.copy(
-                            name = newName,
-                            photoUrl = newPhotoUrl
-                        )
-                    }
-
-                    // Keep photo and name in sync if they change later
-                    if (currentKey != null) {
-                        val livePhoto = childrenPhotoMap[currentKey] ?: defaultPhotoUrl
-                        if (selectedChild.value.photoUrl != livePhoto) {
-                            selectedChild.value = selectedChild.value.copy(photoUrl = livePhoto)
+                    if (targetKey != null) {
+                        val liveName = childrenDisplayMap[targetKey] ?: targetKey.replace("_", " ").let {
+                            it.split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
                         }
+                        val livePhotoUrl = childrenPhotoMap[targetKey] ?: defaultPhotoUrl
 
-                        val liveName = childrenDisplayMap[currentKey]
-                        if (liveName != null && selectedChild.value.name != liveName) {
-                            selectedChild.value = selectedChild.value.copy(name = liveName)
+                        // FORCE update in these cases:
+                        // 1. First load (name empty)
+                        // 2. Name changed
+                        // 3. Photo URL changed
+                        // 4. Stuck on default photo but real one is now available ← THIS IS THE KEY FIX
+                        val needsUpdate = currentName.isEmpty() ||
+                                selectedChild.value.name != liveName ||
+                                selectedChild.value.photoUrl != livePhotoUrl ||
+                                (currentPhotoUrl == defaultPhotoUrl && livePhotoUrl != defaultPhotoUrl)
+
+                        if (needsUpdate) {
+                            Log.d("ParentDashboard", "SYNC → $liveName | Photo updated (forced: ${currentPhotoUrl == defaultPhotoUrl && livePhotoUrl != defaultPhotoUrl})")
+                            selectedChild.value = selectedChild.value.copy(
+                                name = liveName,
+                                photoUrl = livePhotoUrl
+                            )
                         }
+                    }
+                    // Ghost cleanup
+                    else if (currentName.isNotEmpty()) {
+                        Log.d("ParentDashboard", "GHOST → clearing selection")
+                        selectedChild.value = Child(name = "", photoUrl = defaultPhotoUrl, status = initialStatus)
                     }
                 }
 
@@ -475,20 +458,17 @@ fun ParentDashboardScreen(
                 Log.d("ImageCheck", "Loading image for: ${selectedChild.value.name}")
 
                 // Photo URL is still managed by the selectedChild state (updated by Fix B)
-                val livePhotoUrl = selectedChild.value.photoUrl
-                val painter = rememberAsyncImagePainter(
-                    model = ImageRequest.Builder(LocalContext.current)
-                        .data(livePhotoUrl)
-                        .crossfade(true)
-                        .diskCachePolicy(coil.request.CachePolicy.ENABLED)
-                        .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
-                        .build(),
-                    placeholder = painterResource(R.drawable.defaultchild),
-                    error = painterResource(R.drawable.defaultchild)
-                )
+                val currentPhotoUrl = selectedChild.value.photoUrl
 
                 Image(
-                    painter = painter,
+                    painter = rememberAsyncImagePainter(
+                        model = ImageRequest.Builder(LocalContext.current)
+                            .data(currentPhotoUrl)
+                            .crossfade(true)
+                            .build(),
+                        placeholder = painterResource(R.drawable.defaultchild),
+                        error = painterResource(R.drawable.defaultchild)
+                    ),
                     contentDescription = "Child photo for ${selectedChild.value.name}",
                     modifier = Modifier
                         .size(uiSizes.photoSize)
