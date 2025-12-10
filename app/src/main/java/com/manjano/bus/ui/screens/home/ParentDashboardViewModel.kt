@@ -566,35 +566,48 @@ class ParentDashboardViewModel : ViewModel() {
 
     /** Observe photoUrl flow - purely observational, no creation, no initial await() */
     fun getPhotoUrlFlow(key: String): StateFlow<String> {
+        // CRITICAL FIX: Start the flow with the default URL immediately
         val photoFlow = MutableStateFlow(DEFAULT_CHILD_PHOTO_URL)
+
         val dbRef = database.child("children").child(key).child("photoUrl")
 
-        // CRITICAL: Read the CURRENT value first
-        dbRef.get().addOnSuccessListener { snapshot ->
-            val currentUrl = snapshot.getValue(String::class.java) ?: DEFAULT_CHILD_PHOTO_URL
-            viewModelScope.launch {
-                photoFlow.value = currentUrl
-            }
-        }
-
+        // Add a listener to pick up any changes AFTER repair
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
-                val dbUrl = snapshot.getValue(String::class.java) ?: DEFAULT_CHILD_PHOTO_URL
-                if (photoFlow.value != dbUrl) {
-                    photoFlow.value = dbUrl
+                // Use the URL from the DB, falling back to the default if null or empty
+                val dbUrl = snapshot.getValue(String::class.java).orEmpty()
+                val finalUrl = if (dbUrl.isNotBlank()) dbUrl else DEFAULT_CHILD_PHOTO_URL
+
+                if (photoFlow.value != finalUrl) {
+                    photoFlow.value = finalUrl
                 }
             }
-
-            override fun onCancelled(error: DatabaseError) {
-                photoFlow.value = DEFAULT_CHILD_PHOTO_URL
-            }
+            override fun onCancelled(error: DatabaseError) { /* do nothing */ }
         }
 
         dbRef.addValueEventListener(listener)
         addCloseableListener(dbRef, listener)
+
+        // Force emit repaired URL after repair runs
+        viewModelScope.launch {
+            try {
+                val storage = FirebaseStorage.getInstance().reference.child("Children Images")
+                val listResult = storage.listAll().await()
+                val storageFiles = listResult.items.map { it.name }
+                repairAllChildImages(storageFiles) // Will update photoUrl in Firebase
+                // Re-emit the URL after repair
+                dbRef.get().addOnSuccessListener { snapshot ->
+                    val repairedUrl = snapshot.getValue(String::class.java).orEmpty()
+                    val finalRepairedUrl = if (repairedUrl.isNotBlank()) repairedUrl else DEFAULT_CHILD_PHOTO_URL
+                    if (photoFlow.value != finalRepairedUrl) photoFlow.value = finalRepairedUrl
+                }
+            } catch (e: Exception) {
+                Log.e("🔥", "Repair failed: ${e.message}")
+            }
+        }
+
         return photoFlow
     }
-
 
     /** Fetch all storage files and repair */
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
