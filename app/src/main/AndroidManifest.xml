@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.manjano.bus">
+    xmlns:tools="http://schemas.android.com/tools">
 
     <application
         android:name=".ManjanoApp"
@@ -11,10 +10,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Manjano.NoActionBar"
         tools:ignore="GoogleAppIndexingWarning">
-        <!-- Google Maps API Key -->
+
+        <!-- Google Maps API Key — ONLY ONE TIME -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
-            android:value="YOUR_GOOGLE_MAPS_API_KEY_HERE"/>
+            android:value="AIzaSyAw9C7fTPJHwzl-KWiLPwaNjq0iYdXd7wo" />
 
         <!-- Main Launcher Activity -->
         <activity
@@ -27,19 +27,17 @@
             </intent-filter>
         </activity>
 
-        <!-- New Compose Profile Setup Activity -->
         <activity
             android:name=".compose.ProfileSetupActivity"
             android:exported="false"
             android:screenOrientation="unspecified"
             android:theme="@style/Theme.Manjano.NoActionBar" />
 
-        <!-- Keep legacy activity for gradual migration -->
         <activity
             android:name=".legacy.ProfileSetupActivity"
             android:exported="false"
             android:screenOrientation="unspecified" />
 
-        </application>
+    </application>
 
 </manifest>
