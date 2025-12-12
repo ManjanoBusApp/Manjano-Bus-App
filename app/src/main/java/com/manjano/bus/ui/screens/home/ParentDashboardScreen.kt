@@ -401,7 +401,7 @@ fun ParentDashboardScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(12.dp))
+               Spacer(modifier = Modifier.height(12.dp))
 
                 // ETA text state
                 var etaText by remember { mutableStateOf("Loading...") }
@@ -576,7 +576,7 @@ fun ParentDashboardScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp)) // small gap from map
+              Spacer(modifier = Modifier.height(8.dp)) // small gap from map
 
                 Box(
                     modifier = Modifier
