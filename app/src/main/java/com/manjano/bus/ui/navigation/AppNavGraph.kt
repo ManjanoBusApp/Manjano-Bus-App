@@ -56,10 +56,6 @@ fun AppNavGraph(navController: NavHostController) {
             SignupScreen(navController = navController)
         }
 
-        composable("signup") { _: NavBackStackEntry ->
-            SignupScreen(navController = navController)
-        }
-
         composable("driver_signup") { _: NavBackStackEntry ->
             DriverSignupScreen(navController = navController)
         }
