@@ -11,20 +11,30 @@ import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
 import com.google.firebase.storage.FirebaseStorage
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
-import kotlinx.coroutines.isActive
 
-class ParentDashboardViewModel : ViewModel() {
+
+/** Sanitizes a string to be used as a Firebase Realtime Database key.
+ * Converts to lowercase and replaces non-alphanumeric characters with underscores.
+ */
+private fun sanitizeKey(input: String): String {
+    return input.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+}
+
+class ParentDashboardViewModel(
+) : ViewModel() {
+
+    // XXXXXXXXXX PRIVATE CONTEXT XXXXXXXXXX
+    private val _parentKey = MutableStateFlow("") // Initialize as empty
+    private val liveParentKey: StateFlow<String> = _parentKey // Use a flow to react to changes
 
     // --- BUS LOCATION STATEFLOWS ---
     private val _busLocations = mutableMapOf<String, MutableStateFlow<LatLng>>()
@@ -42,8 +52,9 @@ class ParentDashboardViewModel : ViewModel() {
     // --- Real-time children list ---
     private val _childrenKeys = MutableStateFlow<List<String>>(emptyList())
     val childrenKeys: StateFlow<List<String>> = _childrenKeys
-    private val childrenRef = database.child("children")
-
+     // CRITICAL FIX: Define childrenRef as a custom getter that reads the *current value* of the key flow
+    private val childrenRef: DatabaseReference
+        get() = database.child("parents").child(_parentKey.value).child("children")
     private val childrenEventListener = object : ChildEventListener {
         override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
@@ -90,58 +101,70 @@ class ParentDashboardViewModel : ViewModel() {
     }
 
     init {
+        // Bus location does not depend on parentKey, run immediately
         observeBusLocation()
-        childrenRef.addChildEventListener(childrenEventListener)
 
-// --- NEW: Load all keys immediately to prevent UI issues and provide live data fast ---
-        loadAllChildrenKeys()
-
-        // Run auto-cleanup once on startup (with delay to avoid race conditions)
+        // CRITICAL FIX: Use the parentKey flow to set up all dependent listeners and jobs.
+        // This runs only when _parentKey is first set to a non-empty value.
         viewModelScope.launch {
-            delay(5000) // Wait for initial data to load
-            autoCleanupDuplicates()
-        }
+            liveParentKey.collectLatest { key ->
+                // Ensure this only runs once and only when the key is set by initializeParent()
+                if (key.isNotBlank()) {
+                    Log.d("🔥", "Starting all parent-dependent listeners for key: $key")
 
-//  Single, clean, bulletproof display name monitor
-        childrenRef.addValueEventListener(object : ValueEventListener {
-            private val renameInProgress = mutableSetOf<String>() // Track renames to prevent loops
+                    // ATTACH Real-time children list listener
+                    childrenRef.addChildEventListener(childrenEventListener)
 
-            override fun onDataChange(snapshot: DataSnapshot) {
-                for (childSnap in snapshot.children) {
-                    val key = childSnap.key ?: continue
-                    val displayName = childSnap.child("displayName").getValue(String::class.java) ?: continue
-                    val normalizedNewKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
 
-                    if (key != normalizedNewKey && !renameInProgress.contains(key)) {
-                        Log.d("🔥", "Auto-renaming child node: $key → $normalizedNewKey (displayName = '$displayName')")
-                        renameInProgress.add(key)
+                    // START AUTO-RENAME MONITOR (Your original logic)
+                    childrenRef.addValueEventListener(object : ValueEventListener {
+                        private val renameInProgress = mutableSetOf<String>()
 
-                        renameChildNode(oldKey = key, newKey = normalizedNewKey) { newKey ->
-                            renameInProgress.remove(key)
+                        override fun onDataChange(snapshot: DataSnapshot) {
+                            for (childSnap in snapshot.children) {
+                                val childKey = childSnap.key ?: continue
+                                val displayName = childSnap.child("displayName").getValue(String::class.java) ?: continue
+                                val normalizedNewKey = displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+
+                                if (childKey != normalizedNewKey && !renameInProgress.contains(childKey)) {
+                                    Log.d("🔥", "Auto-renaming child node: $childKey → $normalizedNewKey (displayName = '$displayName')")
+                                    renameInProgress.add(childKey)
+
+                                    renameChildNode(oldKey = childKey, newKey = normalizedNewKey) { newKey ->
+                                        renameInProgress.remove(childKey)
+                                    }
+                                }
+                            }
+                        }
+
+                        override fun onCancelled(error: DatabaseError) {
+                            Log.e("🔥", "Global displayName monitor cancelled: ${error.message}")
+                        }
+                    })
+
+                    // 4. RUN CLEANUP JOB (delayed - Your original logic)
+                    viewModelScope.launch {
+                        delay(5000)
+                        autoCleanupDuplicates()
+                    }
+
+                    // 5. RUN IMAGE REPAIR JOB (Your original logic)
+                    viewModelScope.launch {
+                        try {
+                            val storage = FirebaseStorage.getInstance().reference.child("Children Images")
+                            val listResult = suspendCancellableCoroutine { cont ->
+                                storage.listAll()
+                                    .addOnSuccessListener { cont.resume(it) }
+                                    .addOnFailureListener { cont.resumeWithException(it) }
+                            }
+                            val storageFiles = listResult.items.map { it.name }
+                            repairAllChildImages(storageFiles)
+                            Log.d("🔥", "Initial storage repair completed, files: ${storageFiles.size}")
+                        } catch (e: Exception) {
+                            Log.e("🔥", "Initial storage repair failed: ${e.message}")
                         }
                     }
                 }
-            }
-
-            override fun onCancelled(error: DatabaseError) {
-                Log.e("🔥", "Global displayName monitor cancelled: ${error.message}")
-            }
-        })
-
-        // Run repair ONCE on startup, not periodically
-        viewModelScope.launch {
-            try {
-                val storage = FirebaseStorage.getInstance().reference.child("Children Images")
-                val listResult = suspendCancellableCoroutine { cont ->
-                    storage.listAll()
-                        .addOnSuccessListener { cont.resume(it) }
-                        .addOnFailureListener { cont.resumeWithException(it) }
-                }
-                val storageFiles = listResult.items.map { it.name }
-                repairAllChildImages(storageFiles)
-                Log.d("🔥", "Initial storage repair completed, files: ${storageFiles.size}")
-            } catch (e: Exception) {
-                Log.e("🔥", "Initial storage repair failed: ${e.message}")
             }
         }
     }
@@ -173,6 +196,17 @@ class ParentDashboardViewModel : ViewModel() {
         })
 
         return result
+    }
+
+
+    /** MUST be called immediately after ViewModel creation to set the user context. */
+    fun initializeParent(rawParentName: String) {
+        val newParentKey = sanitizeKey(rawParentName)
+        if (_parentKey.value.isEmpty()) {
+            _parentKey.value = newParentKey
+            Log.d("🔥", "ViewModel parent key set to: $newParentKey")
+
+           }
     }
     private fun observeBusLocation() {
         val busRef = database.child("busLocation")
@@ -259,46 +293,15 @@ class ParentDashboardViewModel : ViewModel() {
             }
         }
     }
-    private fun createChildIfMissing(childKey: String, displayName: String) {
-        // BLOCK RESURRECTION: Never recreate a key that has been officially decommissioned
-        val decommissionedRef = database.child("decommissionedKeys").child(childKey)
-        decommissionedRef.get().addOnSuccessListener { snapshot ->
-            if (snapshot.exists()) {
-                Log.d("🔥", "BLOCKED resurrection of decommissioned key: $childKey")
-                return@addOnSuccessListener
-            }
 
-            // Safe to proceed — key has never been renamed away
-            val ref = database.child("children").child(childKey)
-            ref.get().addOnSuccessListener { childSnapshot ->
-                if (!childSnapshot.exists()) {
-                    val defaultData = mapOf(
-                        "displayName" to displayName,
-                        "eta" to "Arriving in 5 minutes",
-                        "status" to "On Route",
-                        "messages" to emptyMap<String, Any>(),
-                        "photoUrl" to DEFAULT_CHILD_PHOTO_URL
-                    )
-                    ref.updateChildren(defaultData)
-                } else {
-                    val updates = mutableMapOf<String, Any>()
-                    if (!childSnapshot.hasChild("displayName")) updates["displayName"] = displayName
-                    if (!childSnapshot.hasChild("status")) updates["status"] = "On Route"
-                    if (!childSnapshot.hasChild("messages")) updates["messages"] = emptyMap<String, Any>()
-                    if (!childSnapshot.hasChild("photoUrl")) updates["photoUrl"] = DEFAULT_CHILD_PHOTO_URL
-                    if (updates.isNotEmpty()) ref.updateChildren(updates)
-                }
-            }
-        }
-    }
 
     /** Initialize all children from a list of names */
     fun initializeChildrenFromList(childNames: List<String>) {
-        childNames.forEach { childName ->
-            val key = childName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-            createChildIfMissing(key, childName)
-        }
-        Log.d("🔥", "Initialized ${childNames.size} children in Firebase")
+        // CRITICAL FIX: Since SignUpViewModel now creates all nodes under /parents,
+        // we only need to ensure the listeners and UI are active.
+        // We stop all data writes here to prevent race conditions and preserve the
+        // single source of truth (SignUpViewModel).
+        Log.d("🔥", "Initialization skipped writes. Listening to live data now.")
     }
 
     private fun renameChildNode(oldKey: String, newKey: String, onRenamed: (String) -> Unit = {}) {
@@ -306,7 +309,7 @@ class ParentDashboardViewModel : ViewModel() {
             if (!snapshot.exists()) return@addOnSuccessListener
             val oldData = snapshot.value
 
-            // Copy all data to new node
+            // Copy all data to new node (still under the parent's childrenRef)
             childrenRef.child(newKey).setValue(oldData).addOnSuccessListener {
                 // Remove old node immediately — with error handling and retry
                 childrenRef.child(oldKey).removeValue()
@@ -328,7 +331,7 @@ class ParentDashboardViewModel : ViewModel() {
                     .addOnFailureListener { exception ->
                         Log.e("🔥", "CRITICAL: Failed to delete old node $oldKey – GHOST NODE WARNING", exception)
                         // FORCE delete with direct reference (bypass possible listener interference)
-                        database.child("children").child(oldKey).removeValue()
+                        childrenRef.child(oldKey).removeValue() // CRITICAL: Target parent-scoped path
                             .addOnSuccessListener {
                                 Log.w("🔥", "Force-deleted old node $oldKey after initial failure")
                             }
@@ -364,7 +367,7 @@ class ParentDashboardViewModel : ViewModel() {
         // NOTE: The key is expected to be the correct, normalized key (e.g., 'dez_gatesh')
         val etaFlow = MutableStateFlow("Loading...")
 
-        val ref = database.child("children").child(key).child("eta")
+        val ref = childrenRef.child(key).child("eta")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val eta = snapshot.getValue(String::class.java) ?: "Arriving in 5 minutes"
@@ -385,7 +388,7 @@ class ParentDashboardViewModel : ViewModel() {
         // NOTE: The key is expected to be the correct, normalized key (e.g., 'dez_gatesh')
         val nameFlow = MutableStateFlow("Loading...")
 
-        val ref = database.child("children").child(key).child("displayName")
+        val ref = childrenRef.child(key).child("displayName")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 // If displayName is missing, use the key as a fallback, NOT the static name
@@ -407,7 +410,7 @@ class ParentDashboardViewModel : ViewModel() {
         // NOTE: No key calculation here, only use the provided key
         val statusFlow = MutableStateFlow("Loading...")
 
-        val ref = database.child("children").child(key).child("status")
+        val ref = childrenRef.child(key).child("status")
         val listener = object : ValueEventListener {
             override fun onDataChange(snapshot: DataSnapshot) {
                 val status = snapshot.getValue(String::class.java) ?: "Unknown"
@@ -427,13 +430,13 @@ class ParentDashboardViewModel : ViewModel() {
     /** Update child's status, accepts only the normalized KEY */
     fun updateChildStatus(key: String, newStatus: String) {
         // NOTE: No key calculation here, only use the provided key
-        database.child("children").child(key).child("status").setValue(newStatus)
+        childrenRef.child(key).child("status").setValue(newStatus)
     }
 
     /** Send quick action message, accepts only the normalized KEY */
     fun sendQuickActionMessage(key: String, action: String, message: String) {
         // NOTE: No key calculation here, only use the provided key
-        val messageRef = database.child("children").child(key).child("messages").push()
+        val messageRef = childrenRef.child(key).child("messages").push()
         val msgData = mapOf(
             "action" to action,
             "message" to message,
@@ -488,7 +491,7 @@ class ParentDashboardViewModel : ViewModel() {
                     val shouldUpdate = currentUrl != verifiedUrl
 
                     if (shouldUpdate) {
-                        database.child("children").child(key).child("photoUrl").setValue(verifiedUrl)
+                        childrenRef.child(key).child("photoUrl").setValue(verifiedUrl) // CRITICAL: Target parent-scoped path
                         Log.d("🔥", "✅ Updated photo for '$key' (displayName: '$displayName') → ${matchedFile ?: "default"}")
                     }
                 }
@@ -569,7 +572,7 @@ class ParentDashboardViewModel : ViewModel() {
         // CRITICAL FIX: Start the flow with the default URL immediately
         val photoFlow = MutableStateFlow(DEFAULT_CHILD_PHOTO_URL)
 
-        val dbRef = database.child("children").child(key).child("photoUrl")
+        val dbRef = childrenRef.child(key).child("photoUrl") // CRITICAL: Target parent-scoped path
 
         // Add a listener to pick up any changes AFTER repair
         val listener = object : ValueEventListener {
@@ -613,29 +616,8 @@ class ParentDashboardViewModel : ViewModel() {
     fun fetchAndRepairChildImages(storageFiles: List<String>) {
         viewModelScope.launch { repairAllChildImages(storageFiles) }
     }
-    /** Call this once from the screen to force-load all existing children keys */
-    fun loadAllChildrenKeys() {
-        childrenRef.get().addOnSuccessListener { snapshot ->
-            val keys = snapshot.children.mapNotNull { it.key }
-            viewModelScope.launch {
-                _childrenKeys.value = keys.toList()
-                Log.d("🔥", "Force-loaded ${keys.size} children keys: $keys")
-            }
-        }.addOnFailureListener {
-            Log.e("🔥", "Failed to force-load children keys", it)
-        }
-    }
 
-    // Add this public function — safe, no private access
-    fun refreshChildrenKeys() {
-        childrenRef.get().addOnSuccessListener { snapshot ->
-            val keys = snapshot.children.mapNotNull { it.key }.toList()
-            viewModelScope.launch {
-                _childrenKeys.value = keys
-                Log.d("🔥", "Refreshed ${keys.size} children keys → rename now works perfectly")
-            }
-        }
-    }
+
     companion object {
         private const val DEFAULT_CHILD_PHOTO_URL =
             "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"

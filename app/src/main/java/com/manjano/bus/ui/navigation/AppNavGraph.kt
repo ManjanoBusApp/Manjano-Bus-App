@@ -75,14 +75,14 @@ fun AppNavGraph(navController: NavHostController) {
                 }
             )
         ) { backStackEntry ->
-            // Decode values passed from SignupScreen
+            // Decode values passed from SignupScreen (kept for logging/safety)
             val parentName = URLDecoder.decode(
                 backStackEntry.arguments?.getString("parentName") ?: "",
                 StandardCharsets.UTF_8.toString()
             )
             val childrenNames = URLDecoder.decode(
-            backStackEntry.arguments?.getString("childrenNames") ?: "",
-            StandardCharsets.UTF_8.toString()
+                backStackEntry.arguments?.getString("childrenNames") ?: "",
+                StandardCharsets.UTF_8.toString()
             )
             val status = URLDecoder.decode(
                 backStackEntry.arguments?.getString("status") ?: "On Route",
@@ -93,9 +93,7 @@ fun AppNavGraph(navController: NavHostController) {
 
             ParentDashboardScreen(
                 navController = navController,
-                parentName = parentName,
-                childrenNames = childrenNames,
-                initialStatus = status
+                navBackStackEntry = backStackEntry // <-- CRITICAL: Pass the backStackEntry object
             )
         }
 

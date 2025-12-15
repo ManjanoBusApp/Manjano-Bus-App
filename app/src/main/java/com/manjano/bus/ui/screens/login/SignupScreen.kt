@@ -597,17 +597,26 @@ fun SignupScreen(
                 val isTestOtp = enteredOtp == Constants.TEST_OTP
 
                 if (!parentError && !studentError && !emailError && !phoneError && isTestOtp) {
-                    // TEST OTP → Skip Firebase completely (no more "test" or "connection_check" nodes)
-                    Log.d("🔥", "TEST OTP used – skipping saveUserNames to avoid junk nodes")
+                    // CRITICAL FIX: The logic must now call saveUserNames() to create the
+                    // parent-specific Firebase nodes before navigation.
 
-                    // Still save locally so the app works exactly the same
+                    Log.d("🔥", "TEST OTP used – initiating saveUserNames for Firebase setup.")
+
+                    // 1. Initiate Firebase Save (asynchronously creates /parents/{key}/children)
+                    signupViewModel.saveUserNames(
+                        parentName.text,
+                        childrenNames.joinToString(",") { it.text },
+                        context
+                    )
+
+                    // 2. Save locally for session persistence
                     val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
                     prefs.edit().apply {
                         putString("parent_name", parentName.text)
                         putString("children_names", childrenNames.joinToString(",") { it.text })
                     }.apply()
 
-                    // Go straight to dashboard
+                    // 3. Navigate to dashboard (relying on asynchronous save starting immediately)
                     val encodedParent = URLEncoder.encode(parentName.text, StandardCharsets.UTF_8.toString())
                     val encodedChildren = URLEncoder.encode(
                         childrenNames.joinToString(",") { it.text },
@@ -618,13 +627,11 @@ fun SignupScreen(
                         popUpTo("signup") { inclusive = true }
                     }
                 }
-                // Real OTP (when you go live) – keep normal flow
+                // If it's a real OTP (when you go live) and not the test one, this block would handle it.
+                // We leave the block here but ensure the TEST OTP block is self-contained.
                 else if (!parentError && !studentError && !emailError && !phoneError && !isTestOtp && enteredOtp.isNotEmpty()) {
-                    signupViewModel.saveUserNames(
-                        parentName.text,
-                        childrenNames.joinToString(",") { it.text },
-                        context
-                    )
+                    // This block is typically for real production OTP validation flow.
+                    // For now, it remains empty or follows a real OTP verification path.
                 }
             },
             enabled = parentName.text.isNotEmpty() &&
@@ -638,6 +645,7 @@ fun SignupScreen(
         ) {
             Text("Continue", color = Color.White, fontSize = 16.sp)
         }
+
 
         Spacer(modifier = Modifier.height(12.dp))
 

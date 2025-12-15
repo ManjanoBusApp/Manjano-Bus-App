@@ -14,7 +14,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import kotlin.math.min
 
+private fun sanitizeKey(name: String): String =
+    name.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
 
 data class SignUpUiState(
     val otpDigits: List<String> = List(Constants.OTP_LENGTH) { "" },
@@ -68,40 +71,9 @@ class SignUpViewModel : ViewModel() {
     }
 
     private fun testFirebaseConnection() {
-        Log.d("🔥", "🔍 Starting Firebase connection test...")
-        val testRef = database.child("test").child("connection_check")
-        val testData =
-            mapOf("test" to "connection_check", "timestamp" to System.currentTimeMillis())
-
-        Log.d("🔥", "🔍 Attempting test write to 'test/connection_check'...")
-        testRef.setValue(testData)
-            .addOnSuccessListener {
-                Log.d("🔥", "✅ Test write to 'test/connection_check' succeeded")
-                _uiState.value = _uiState.value.copy(
-                    otpErrorMessage = "Firebase connection test succeeded!",
-                    showOtpError = true
-                )
-            }
-            .addOnFailureListener { exception ->
-                Log.e(
-                    "🔥",
-                    "❌ Test write to 'test/connection_check' failed: ${exception.message}",
-                    exception
-                )
-                _uiState.value = _uiState.value.copy(
-                    otpErrorMessage = "Firebase test failed: ${exception.message}",
-                    showOtpError = true
-                )
-            }
-            .addOnCanceledListener {
-                Log.e("🔥", "❌ Test write to 'test/connection_check' was canceled")
-                _uiState.value = _uiState.value.copy(
-                    otpErrorMessage = "Firebase test was canceled",
-                    showOtpError = true
-                )
-            }
+        // Test connection is no longer required as actual data write is the test.
+        Log.d("🔥", "🔍 Firebase connection test skipped.")
     }
-
     fun setOtpValid(valid: Boolean) {
         _isOtpValid.value = valid
     }
@@ -159,10 +131,13 @@ class SignUpViewModel : ViewModel() {
     fun verifyOtp() {
         val enteredOtp = _uiState.value.otpDigits.joinToString("")
         if (enteredOtp == Constants.TEST_OTP) {
+            // CRITICAL FIX: Set navigation flag. The UI (ParentSignupScreen) MUST
+            // call saveUserNames() BEFORE navigating when this flag is set.
             _uiState.value = _uiState.value.copy(
                 navigateToDashboard = true,
                 showOtpError = false
             )
+            Log.d("🔥", "✅ OTP verified. Signaling UI to save names and navigate.")
         } else {
             _uiState.value = _uiState.value.copy(
                 otpErrorMessage = "Incorrect OTP. Please try again.",
@@ -204,99 +179,119 @@ class SignUpViewModel : ViewModel() {
         fun normalizeName(name: String): String =
             name.lowercase().replace(Regex("[^a-z0-9]"), "")
 
-        // ✅ New: List all image files from the "Children Images" folder in Firebase Storage
-        val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
-            .reference
-            .child("Children Images") // 👈 point to correct folder where images are stored
+        // CRITICAL FIX: Wrap entire asynchronous storage/database operation in try-catch to prevent main thread crash.
+        try {
+            // ✅ New: List all image files from the "Children Images" folder in Firebase Storage
+            val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
+                .reference
+                .child("Children Images") // 👈 point to correct folder where images are stored
 
-        val imageBaseNames = mutableMapOf<String, String>()  // normalized name -> full file name
+            val imageBaseNames = mutableMapOf<String, String>()  // normalized name -> full file name
 
-        storage.listAll()
-            .addOnSuccessListener { listResult ->
-                Log.d("🔥", "✅ Listed ${listResult.items.size} files from Storage")
+            storage.listAll()
+                .addOnSuccessListener { listResult ->
+                    Log.d("🔥", "✅ Listed ${listResult.items.size} files from Storage")
 
-                listResult.items.forEach { item ->
-                    val fullName = item.name
-                    val baseName = fullName.substringBeforeLast('.')
-                    val normalizedBase = normalizeName(baseName)
-                    imageBaseNames[normalizedBase] = fullName
-                    Log.d("🔥", "📸 Found: $fullName → normalized=$normalizedBase")
-                }
+                    listResult.items.forEach { item ->
+                        val fullName = item.name
+                        val baseName = fullName.substringBeforeLast('.')
+                        val normalizedBase = normalizeName(baseName)
+                        imageBaseNames[normalizedBase] = fullName
+                        Log.d("🔥", "📸 Found: $fullName → normalized=$normalizedBase")
+                    }
 
-                val childrenList = childrenNames.split(",").map { it.trim() }
+                    val childrenList = childrenNames.split(",").map { it.trim() }
 
-                childrenList.forEach { childName ->
-                    if (childName.isNotEmpty()) {
-                        val childKey = childName.lowercase().replace(Regex("[^a-z0-9]"), "_")
-                        val sanitizedChildName = normalizeName(childName)
+                    childrenList.forEach { childName ->
+                        if (childName.isNotEmpty()) {
+                            val childKey = childName.lowercase().replace(Regex("[^a-z0-9]"), "_")
+                            val sanitizedChildName = normalizeName(childName)
 
-                        // Simple Levenshtein fuzzy matching
-                        fun levenshtein(lhs: String, rhs: String): Int {
-                            val dp = Array(lhs.length + 1) { IntArray(rhs.length + 1) }
-                            for (i in 0..lhs.length) dp[i][0] = i
-                            for (j in 0..rhs.length) dp[0][j] = j
-                            for (i in 1..lhs.length) {
-                                for (j in 1..rhs.length) {
-                                    val cost = if (lhs[i - 1] == rhs[j - 1]) 0 else 1
-                                    dp[i][j] = minOf(
-                                        dp[i - 1][j] + 1,
-                                        dp[i][j - 1] + 1,
-                                        dp[i - 1][j - 1] + cost
-                                    )
+                            // Simple Levenshtein fuzzy matching
+                            fun levenshtein(lhs: String, rhs: String): Int {
+                                val dp = Array(lhs.length + 1) { IntArray(rhs.length + 1) }
+                                for (i in 0..lhs.length) dp[i][0] = i
+                                for (j in 0..rhs.length) dp[0][j] = j
+                                for (i in 1..lhs.length) {
+                                    for (j in 1..rhs.length) {
+                                        val cost = if (lhs[i - 1] == rhs[j - 1]) 0 else 1
+                                        dp[i][j] = minOf(
+                                            dp[i - 1][j] + 1,
+                                            dp[i][j - 1] + 1,
+                                            dp[i - 1][j - 1] + cost
+                                        )
+                                    }
                                 }
+                                return dp[lhs.length][rhs.length]
                             }
-                            return dp[lhs.length][rhs.length]
-                        }
 
-                        val chosenBase = imageBaseNames.keys.find { key ->
-                            key.contains(sanitizedChildName, ignoreCase = true) ||
-                                    sanitizedChildName.contains(key, ignoreCase = true) ||
-                                    key.toCharArray().sorted().joinToString("") == sanitizedChildName.toCharArray().sorted().joinToString("")
-                        }
+                            val chosenBase = imageBaseNames.keys.find { key ->
+                                key.contains(sanitizedChildName, ignoreCase = true) ||
+                                        sanitizedChildName.contains(key, ignoreCase = true) ||
+                                        key.toCharArray().sorted().joinToString("") == sanitizedChildName.toCharArray().sorted().joinToString("")
+                            }
 
-                        val finalFileName = if (chosenBase != null) imageBaseNames[chosenBase] else null
+                            val finalFileName = if (chosenBase != null) imageBaseNames[chosenBase] else null
 
-                        val imageRef = if (finalFileName != null) {
-                            // file exists in Children Images folder
-                            storage.child(finalFileName)
-                        } else {
-                            // fallback: explicit reference to Default Image/defaultchild.png
-                            // storage is reference to "Children Images" — use storage.root to access the top-level then child the correct folder
-                            storage.root.child("Default Image").child("defaultchild.png")
-                        }
+                            val imageRef = if (finalFileName != null) {
+                                // file exists in Children Images folder
+                                storage.child(finalFileName)
+                            } else {
+                                // fallback: explicit reference to Default Image/defaultchild.png
+                                // storage is reference to "Children Images" — use storage.root to access the top-level then child the correct folder
+                                storage.root.child("Default Image").child("defaultchild.png")
+                            }
 
-                        imageRef.downloadUrl.addOnSuccessListener { uri ->
-                            val photoUrl = uri.toString()
-                            val childRef = com.google.firebase.database.FirebaseDatabase
-                                .getInstance()
-                                .getReference("children")
-                                .child(childKey)
+                            imageRef.downloadUrl.addOnSuccessListener { uri ->
+                                val photoUrl = uri.toString()
 
-                            val childData = mapOf(
-                                "eta" to "Arriving in 5 minutes",
-                                "active" to true,                               "displayName" to childName,
-                                "photoUrl" to photoUrl
-                            )
+                                // NEW: Get the parent key from the parentName
+                                val parentKey = sanitizeKey(parentName)
 
-                            childRef.setValue(childData)
-                                .addOnSuccessListener {
-                                    Log.d("🔥", "✅ Saved '$childKey' with image ${imageRef.name}")
-                                }
-                                .addOnFailureListener { e ->
-                                    Log.e("🔥", "❌ Failed to save '$childKey': ${e.message}", e)
-                                }
-                        }.addOnFailureListener {
-                            Log.e("🔥", "❌ Failed to get image URL for $childName: ${it.message}")
+                                // NEW: Change path to /parents/{parentKey}/children/{childKey}
+                                val childRef = com.google.firebase.database.FirebaseDatabase
+                                    .getInstance()
+                                    .getReference("parents") // 👈 New parent node
+                                    .child(parentKey)       // 👈 Parent-specific node
+                                    .child("children")      // 👈 Child collection under parent
+                                    .child(childKey)        // 👈 Child node
+
+                                val childData = mapOf(
+                                    "eta" to "Arriving in 5 minutes",
+                                    "active" to true,
+                                    "displayName" to childName,
+                                    "photoUrl" to photoUrl,
+                                    "status" to "On Route",
+                                    "messages" to emptyMap<String, Any>()
+                                )
+
+                                childRef.setValue(childData)
+                                    .addOnSuccessListener {
+                                        Log.d("🔥", "✅ Saved '$childKey' under parent '$parentKey' with image ${imageRef.name}")
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Log.e("🔥", "❌ Failed to save '$childKey' for parent '$parentKey': ${e.message}", e)
+                                    }
+                            }.addOnFailureListener {
+                                Log.e("🔥", "❌ Failed to get image URL for $childName: ${it.message}")
+                            }
                         }
                     }
                 }
-            }
-            .addOnFailureListener { e ->
-                Log.e("🔥", "❌ Failed to list Storage files: ${e.message}", e)
-                _uiState.value = _uiState.value.copy(
-                    otpErrorMessage = "Failed to list images: ${e.message}",
-                    showOtpError = true
-                )
-            }
+                .addOnFailureListener { e ->
+                    Log.e("🔥", "❌ Failed to list Storage files: ${e.message}", e)
+                    _uiState.value = _uiState.value.copy(
+                        otpErrorMessage = "Failed to list images: ${e.message}",
+                        showOtpError = true
+                    )
+                }
+        } catch (e: Exception) {
+            // CRITICAL: Catch immediate exceptions like FirebaseApp not initialized or Storage issues
+            Log.e("🔥", "❌ CRITICAL: Immediate failure during Firebase save setup: ${e.message}", e)
+            _uiState.value = _uiState.value.copy(
+                otpErrorMessage = "CRITICAL: App configuration error during data save. Check Firebase SDK.",
+                showOtpError = true
+            )
+        }
     }
 }

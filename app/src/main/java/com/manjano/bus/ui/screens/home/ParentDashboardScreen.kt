@@ -99,11 +99,14 @@ private val defaultPhotoUrl =
 @Composable
 fun ParentDashboardScreen(
     navController: NavHostController,
-    parentName: String,
-    childrenNames: String,
-    initialStatus: String = "On Route",
+    navBackStackEntry: androidx.navigation.NavBackStackEntry?, // <-- New parameter to retrieve args
     viewModel: ParentDashboardViewModel = hiltViewModel()
 ) {
+
+    // CRITICAL FIX: Manually retrieve arguments from the NavBackStackEntry
+    val parentName = navBackStackEntry?.arguments?.getString("parentName") ?: ""
+    val childrenNames = navBackStackEntry?.arguments?.getString("childrenNames") ?: ""
+    val initialStatus = navBackStackEntry?.arguments?.getString("initialStatus") ?: "On Route"
     // DON'T create nodes from this list - it has wrong names!
     // Instead, get the CORRECT names from somewhere else
 
@@ -121,16 +124,16 @@ fun ParentDashboardScreen(
 
     // Instead, just load existing Firebase children
 
-    // Initialize ALL children in Firebase immediately when dashboard loads
-    LaunchedEffect(childrenNames) {
-        viewModel.refreshChildrenKeys()
-
-        val displayNames = childrenNames.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-        if (displayNames.isNotEmpty()) {
-            viewModel.initializeChildrenFromList(displayNames)
-            Log.d("ParentDashboard", "Initialized ${displayNames.size} children in Firebase")
+    // 1. CRITICAL: Initialize the ViewModel with the retrieved arguments
+    LaunchedEffect(parentName) {
+        if (parentName.isNotEmpty()) {
+            viewModel.initializeParent(parentName)
+            // The childrenNames string is no longer used for creation, but only to ensure we have the full list
+            // of names the user entered for quick display until live data loads.
+            Log.d("🔥", "Dashboard Initialized for Parent: $parentName")
         }
     }
+
 
     val database = FirebaseDatabase.getInstance().reference
     val selectedAction = remember { mutableStateOf("Contact Driver") }
@@ -138,13 +141,20 @@ fun ParentDashboardScreen(
     val textInput = remember { mutableStateOf("") }
     val quickActionExpanded = remember { mutableStateOf(false) }
     val selectedStatus = remember { mutableStateOf(initialStatus) }
-    val sortedNames = childrenNames.split(",").map { it.trim() }.sorted()
-    val sortedDisplayNames = childrenNames.split(",")
+
+    // CRITICAL: Remove all logic relying on splitting the childrenNames parameter string
+    val sortedDisplayNamesFromParam = childrenNames.split(",")
         .map { it.trim() }
         .filter { it.isNotEmpty() }
         .sorted()
 
-    val initialChildName = sortedDisplayNames.firstOrNull() ?: ""
+    // We will use the live list of keys from the ViewModel to determine the initial child.
+    val childrenKeys by viewModel.childrenKeys.collectAsState(initial = emptyList())
+    val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
+
+    // Use the *first* name from the *passed* parameter for the initial UI state name,
+    // which will be quickly replaced by the live Firebase data in the next step.
+    val initialChildName = sortedDisplayNamesFromParam.firstOrNull() ?: ""
 
 // Create selectedChild state once
     val selectedChild = remember {
@@ -310,23 +320,29 @@ fun ParentDashboardScreen(
                     val currentName = selectedChild.value.name
 
                     // 1. Determine the target key: Current selection or the first available key.
+                    // Prioritize the key matching the current selection, otherwise default to the first key available for *this* parent.
                     val targetKey = sortedChildrenKeys.find { key ->
                         childrenDisplayMap[key]?.equals(currentName, ignoreCase = true) == true
                     } ?: sortedChildrenKeys.firstOrNull()
 
                     if (targetKey != null) {
                         val liveName = childrenDisplayMap[targetKey] ?: targetKey.replace("_", " ").let {
+                            // Fallback to capitalizing the key if display name is still loading
                             it.split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
                         }
+                        val livePhotoUrl = childrenPhotoMap[targetKey] ?: defaultPhotoUrl
 
-                        // 2. Determine if a name update is needed
+                        // 2. Determine if a name update is needed (force update if current name is from the URL param)
                         val needsUpdate = currentName.isEmpty() || // Forces first selection on load
+                                currentName == initialChildName || // Force update if current name is still the initial URL parameter
                                 selectedChild.value.name != liveName
 
                         if (needsUpdate) {
                             selectedChild.value = selectedChild.value.copy(
-                                name = liveName
+                                name = liveName,
+                                photoUrl = livePhotoUrl // Also update photo URL here
                             )
+                            Log.d("🔥", "Updated selected child to: $liveName (Key: $targetKey)")
                         }
                     }
                     // Ghost cleanup
