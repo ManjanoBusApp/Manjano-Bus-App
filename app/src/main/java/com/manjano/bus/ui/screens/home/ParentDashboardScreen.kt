@@ -50,8 +50,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -66,24 +68,20 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import coil.compose.rememberAsyncImagePainter
 import coil.request.ImageRequest
+import com.google.android.gms.maps.CameraUpdateFactory
+import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
 import com.google.firebase.database.FirebaseDatabase
-import com.manjano.bus.R
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.layout.onGloballyPositioned
 import com.google.maps.android.compose.GoogleMap
 import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.rememberCameraPositionState
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.BitmapDescriptorFactory
+import com.google.maps.android.compose.rememberCameraPositionState
+import com.manjano.bus.R
+import kotlinx.coroutines.launch
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 
 data class Child(
     val name: String = "",
@@ -144,7 +142,7 @@ fun ParentDashboardScreen(
 
     // CRITICAL: Remove all logic relying on splitting the childrenNames parameter string
     val sortedDisplayNamesFromParam = childrenNames.split(",")
-        .map { it.trim() }
+        .map { it.replace('+', ' ').trim() }
         .filter { it.isNotEmpty() }
         .sorted()
 
@@ -249,28 +247,51 @@ fun ParentDashboardScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
+                // NEW CODE for "Hello" Greeting (FIXED: Handles URL-encoded names like "John+Doe")
+                val displayParentName = remember(parentName) {
+                    // 1. Replace "+" with a space (decoding URL param)
+                    // 2. Trim whitespace
+                    // 3. Split by space and take the first name only
+                    parentName
+                        .replace('+', ' ')
+                        .trim()
+                        .split(" ")
+                        .firstOrNull() ?: parentName // Fallback to original if something goes wrong
+                }
+
                 Text(
-                    text = "Hello ${parentName.split(" ").firstOrNull() ?: parentName}",
+                    text = "Hello $displayParentName",
                     fontSize = if (uiSizes.isTablet) 24.sp else 20.sp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 4.dp)
                         .semantics {
-                            contentDescription = "Greeting: Hello ${
-                                parentName.split(" ").firstOrNull() ?: parentName
-                            }"
+                            contentDescription = "Greeting: Hello $displayParentName"
                         },
                     textAlign = TextAlign.Center
                 )
 
-                val firstNames = childrenNames.split(",")
-                    .map { it.trim().split(" ").firstOrNull() ?: it.trim() }
-                val trackingText = when (firstNames.size) {
-                    0 -> ""
-                    1 -> "Tracking ${firstNames[0]}"
-                    2 -> "Tracking ${firstNames[0]} & ${firstNames[1]}"
-                    else -> "Tracking " + firstNames.dropLast(1)
-                        .joinToString(", ") + " & ${firstNames.last()}"
+                // FIXED CODE: Handles URL-encoded names and correctly formats a list of first names
+
+                val firstNames = remember(childrenNames) {
+                    childrenNames.split(",")
+                        // 1. Decode URL parameter by replacing '+' with space
+                        .map { it.replace('+', ' ').trim() }
+                        // 2. Extract only the first name (word)
+                        .map { it.split(" ").firstOrNull() ?: it.trim() }
+                        .filter { it.isNotEmpty() }
+                        .distinct() // Ensure unique names in the list
+                        .sorted()
+                }
+
+                val trackingText = remember(firstNames) {
+                    when (firstNames.size) {
+                        0 -> ""
+                        1 -> "Tracking ${firstNames[0]}"
+                        2 -> "Tracking ${firstNames[0]} & ${firstNames[1]}"
+                        else -> "Tracking " + firstNames.dropLast(1)
+                            .joinToString(", ") + " & ${firstNames.last()}"
+                    }
                 }
 
                 Text(
@@ -284,11 +305,34 @@ fun ParentDashboardScreen(
                     textAlign = TextAlign.Center
                 )
 
-
                 val childrenKeys by viewModel.childrenKeys.collectAsState(initial = emptyList())
                 val sortedChildrenKeys = childrenKeys.sorted()
                 val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
                 val childrenPhotoMap = remember { mutableStateMapOf<String, String>() }
+
+                // CRITICAL FIX: Merge initial names with live names for full display/tracking coverage
+                val allChildrenNamesForDisplay by remember(childrenDisplayMap.entries, sortedDisplayNamesFromParam) {
+                    // Start with all live names from Firebase
+                    val liveNames = childrenDisplayMap.values.toMutableSet()
+
+                    // Add any initial names that are NOT yet in the live map
+                    // This covers children whose data (key/display name) hasn't fully loaded yet (e.g., Mtu Mzii)
+                    sortedDisplayNamesFromParam.forEach { initialName ->
+                        // Check if the initial name (e.g., "Mtu Mzii") is present as a value in the live map
+                        val isNameAlreadyLive = childrenDisplayMap.containsValue(initialName)
+
+                        // Also, check if a *normalized* version of the initial name is present as a key
+                        val normalizedInitialName = initialName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                        val isKeyAlreadyLive = childrenKeys.contains(normalizedInitialName)
+
+                        if (!isNameAlreadyLive && !isKeyAlreadyLive) {
+                            liveNames.add(initialName)
+                        }
+                    }
+
+                    // Return a sorted list of all unique names
+                    mutableStateOf(liveNames.toList().sorted())
+                }
 
                 LaunchedEffect(childrenKeys) {
                     childrenKeys.forEach { key ->
@@ -391,24 +435,25 @@ fun ParentDashboardScreen(
                         onDismissRequest = { childExpanded.value = false },
                         modifier = Modifier.width(uiSizes.dropdownWidth)
                     ) {
-                        // FIX A: Loop over live keys and use display map for names/photos
-                        sortedChildrenKeys.forEach { key ->
-                            val liveName = childrenDisplayMap[key] ?: key // Fallback to key
-                            val livePhotoUrl = childrenPhotoMap[key] ?: defaultPhotoUrl
+                        // FIX: Loop over all consolidated names for full coverage
+                        allChildrenNamesForDisplay.forEach { displayFullName ->
+                            // Use the live map to get the photo URL if available, otherwise use default
+                            val key = childrenKeys.find { childrenDisplayMap[it] == displayFullName }
+                            val livePhotoUrl = if (key != null) childrenPhotoMap[key] else defaultPhotoUrl
 
                             DropdownMenuItem(
                                 text = {
                                     Text(
-                                        liveName,
+                                        displayFullName,
                                         fontSize = if (uiSizes.isTablet) 14.sp else 12.sp,
                                         color = Color.Black
                                     )
                                 },
                                 onClick = {
-                                    // Update selectedChild with the live name and photo from the map
+                                    // Update selectedChild with the display name and the best available photo URL
                                     selectedChild.value = selectedChild.value.copy(
-                                        name = liveName,
-                                        photoUrl = livePhotoUrl
+                                        name = displayFullName,
+                                        photoUrl = livePhotoUrl ?: defaultPhotoUrl // Ensure default if livePhotoUrl is null
                                     )
                                     childExpanded.value = false
                                 }
