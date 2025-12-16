@@ -307,44 +307,47 @@ class ParentDashboardViewModel(
     private fun renameChildNode(oldKey: String, newKey: String, onRenamed: (String) -> Unit = {}) {
         childrenRef.child(oldKey).get().addOnSuccessListener { snapshot ->
             if (!snapshot.exists()) return@addOnSuccessListener
-            val oldData = snapshot.value
 
-            // Copy all data to new node (still under the parent's childrenRef)
-            childrenRef.child(newKey).setValue(oldData).addOnSuccessListener {
-                // Remove old node immediately — with error handling and retry
-                childrenRef.child(oldKey).removeValue()
-                    .addOnSuccessListener {
-                        Log.d("🔥", "Successfully deleted old node: $oldKey")
-                        onRenamed(newKey)
+            val oldData = snapshot.value as? Map<*, *> ?: return@addOnSuccessListener
+            val updatedData = oldData.toMutableMap()
 
-                        // PERMANENTLY MARK OLD KEY AS DECOMMISSIONED
-                        database.child("decommissionedKeys").child(oldKey).setValue(true)
+            val newDisplayName = updatedData["displayName"] as? String ?: ""
 
-                        // Update children keys list
-                        viewModelScope.launch {
-                            _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
-                                remove(oldKey)
-                                if (!contains(newKey)) add(newKey)
+            childrenRef.child(newKey).setValue(updatedData).addOnSuccessListener {
+                viewModelScope.launch {
+                    val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
+                    storage.listAll().addOnSuccessListener { listResult ->
+                        val storageFiles = listResult.items.map { it.name }
+                        val normalizedFiles = storageFiles.associateBy {
+                            it.substringBeforeLast(".").substringAfterLast("/").lowercase().replace(Regex("[^a-z0-9]"), "_")
+                        }
+
+                        val matchedFile = findBestImageMatch(newKey, normalizedFiles)
+                        val verifiedUrl = if (matchedFile == null) {
+                            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
+                        } else {
+                            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
+                        }
+
+                        childrenRef.child(newKey).child("photoUrl").setValue(verifiedUrl).addOnCompleteListener {
+                            childrenRef.child(oldKey).removeValue().addOnSuccessListener {
+                                database.child("decommissionedKeys").child(oldKey).setValue(true)
+
+                                _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
+                                    remove(oldKey)
+                                    if (!contains(newKey)) add(newKey)
+                                }
+                                onRenamed(newKey)
+                                Log.d("🔥", "Transfer Complete: $oldKey -> $newKey with verified image.")
                             }
                         }
                     }
-                    .addOnFailureListener { exception ->
-                        Log.e("🔥", "CRITICAL: Failed to delete old node $oldKey – GHOST NODE WARNING", exception)
-                        // FORCE delete with direct reference (bypass possible listener interference)
-                        childrenRef.child(oldKey).removeValue() // CRITICAL: Target parent-scoped path
-                            .addOnSuccessListener {
-                                Log.w("🔥", "Force-deleted old node $oldKey after initial failure")
-                            }
-                            .addOnFailureListener { e2 ->
-                                Log.e("🔥", "FINAL FAILURE: Could not delete $oldKey even with force", e2)
-                            }
-                    }
+                }
             }.addOnFailureListener { error ->
-                Log.e("🔥", "Failed to rename node $oldKey -> $newKey: ${error.message}")
+                Log.e("🔥", "Rename failed: ${error.message}")
             }
         }
     }
-
     private fun ViewModel.addCloseableListener(
         ref: DatabaseReference,
         listener: ValueEventListener

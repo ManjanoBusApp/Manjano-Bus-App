@@ -311,26 +311,15 @@ fun ParentDashboardScreen(
                 val childrenPhotoMap = remember { mutableStateMapOf<String, String>() }
 
                 // CRITICAL FIX: Merge initial names with live names for full display/tracking coverage
-                val allChildrenNamesForDisplay by remember(childrenDisplayMap.entries, sortedDisplayNamesFromParam) {
-                    // Start with all live names from Firebase
-                    val liveNames = childrenDisplayMap.values.toMutableSet()
+                val allChildrenNamesForDisplay by remember(childrenKeys, childrenDisplayMap.toMap()) {
+                    val liveNames = childrenKeys.mapNotNull { key ->
+                        childrenDisplayMap[key]
+                    }.toMutableSet()
 
-                    // Add any initial names that are NOT yet in the live map
-                    // This covers children whose data (key/display name) hasn't fully loaded yet (e.g., Mtu Mzii)
-                    sortedDisplayNamesFromParam.forEach { initialName ->
-                        // Check if the initial name (e.g., "Mtu Mzii") is present as a value in the live map
-                        val isNameAlreadyLive = childrenDisplayMap.containsValue(initialName)
-
-                        // Also, check if a *normalized* version of the initial name is present as a key
-                        val normalizedInitialName = initialName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
-                        val isKeyAlreadyLive = childrenKeys.contains(normalizedInitialName)
-
-                        if (!isNameAlreadyLive && !isKeyAlreadyLive) {
-                            liveNames.add(initialName)
-                        }
+                    if (liveNames.isEmpty()) {
+                        liveNames.addAll(sortedDisplayNamesFromParam)
                     }
 
-                    // Return a sorted list of all unique names
                     mutableStateOf(liveNames.toList().sorted())
                 }
 
