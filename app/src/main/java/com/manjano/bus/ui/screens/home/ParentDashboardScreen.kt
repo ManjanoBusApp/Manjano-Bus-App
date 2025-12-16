@@ -327,6 +327,9 @@ fun ParentDashboardScreen(
                     mutableStateOf(namesToDisplay)
                 }
 
+                val context = LocalContext.current
+                val imageLoader = coil.Coil.imageLoader(context)
+
                 LaunchedEffect(childrenKeys) {
                     childrenKeys.forEach { key ->
                         scope.launch {
@@ -339,18 +342,23 @@ fun ParentDashboardScreen(
 
                         scope.launch {
                             viewModel.getPhotoUrlFlow(key).collect { url ->
-                                // CRITICAL FIX: Update map with the URL (now guaranteed to be real or default)
-                                if (url.isNotBlank()) {
-                                    childrenPhotoMap[key] = url
-                                } else {
-                                    // Ensure it falls back to the default if for any reason it's blank
-                                    childrenPhotoMap[key] = defaultPhotoUrl
+                                val finalUrl = if (url.isNullOrBlank()) defaultPhotoUrl else url
+                                childrenPhotoMap[key] = finalUrl
+
+                                if (!url.isNullOrBlank()) {
+                                    val request = ImageRequest.Builder(context)
+                                        .data(url)
+                                        .build()
+                                    imageLoader.enqueue(request)
+                                }
+
+                                if (selectedChild.value.name == childrenDisplayMap[key]) {
+                                    selectedChild.value = selectedChild.value.copy(photoUrl = finalUrl)
                                 }
                             }
                         }
                     }
                 }
-
 
                 LaunchedEffect(sortedChildrenKeys, childrenDisplayMap.size) {
                     val currentName = selectedChild.value.name
@@ -523,23 +531,29 @@ fun ParentDashboardScreen(
                 // Photo URL is still managed by the selectedChild state (updated by Fix B)
                 val currentPhotoUrl = selectedChild.value.photoUrl
 
-                Image(
-                    painter = rememberAsyncImagePainter(
-                        model = ImageRequest.Builder(LocalContext.current)
-                            .data(if (currentPhotoUrl.isNotBlank()) currentPhotoUrl else null)
-                            .crossfade(true)
-                            .build(),
-                        placeholder = painterResource(R.drawable.defaultchild),
-                        error = painterResource(R.drawable.defaultchild)
-                    ),
-                    contentDescription = "Child photo for ${selectedChild.value.name}",
+                Box(
                     modifier = Modifier
                         .size(uiSizes.photoSize)
                         .padding(top = uiSizes.verticalSpacing)
                         .align(Alignment.CenterHorizontally)
-                        .clip(CircleShape),
-                    contentScale = ContentScale.Crop
-                )
+                ) {
+                    Image(
+                        painter = rememberAsyncImagePainter(
+                            model = ImageRequest.Builder(LocalContext.current)
+                                .data(currentPhotoUrl)
+                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .build(),
+                            placeholder = painterResource(R.drawable.defaultchild),
+                            error = painterResource(R.drawable.defaultchild)
+                        ),
+                        contentDescription = "Child photo for ${selectedChild.value.name}",
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(CircleShape),
+                        contentScale = ContentScale.Crop
+                    )
+                }
 
                 Text(
                     text = etaText,
