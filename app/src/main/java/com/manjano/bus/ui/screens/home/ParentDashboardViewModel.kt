@@ -148,20 +148,22 @@ class ParentDashboardViewModel(
                         autoCleanupDuplicates()
                     }
 
-                    // 5. RUN IMAGE REPAIR JOB (Your original logic)
                     viewModelScope.launch {
-                        try {
-                            val storage = FirebaseStorage.getInstance().reference.child("Children Images")
-                            val listResult = suspendCancellableCoroutine { cont ->
-                                storage.listAll()
-                                    .addOnSuccessListener { cont.resume(it) }
-                                    .addOnFailureListener { cont.resumeWithException(it) }
+                        while (true) {
+                            try {
+                                val storage = FirebaseStorage.getInstance().reference.child("Children Images")
+                                val listResult = suspendCancellableCoroutine { cont ->
+                                    storage.listAll()
+                                        .addOnSuccessListener { cont.resume(it) }
+                                        .addOnFailureListener { cont.resumeWithException(it) }
+                                }
+                                val storageFiles = listResult.items.map { it.name }
+                                repairAllChildImages(storageFiles)
+                                Log.d("🔥", "Storage repair heartbeat: Checking for new images...")
+                            } catch (e: Exception) {
+                                Log.e("🔥", "Storage repair loop error: ${e.message}")
                             }
-                            val storageFiles = listResult.items.map { it.name }
-                            repairAllChildImages(storageFiles)
-                            Log.d("🔥", "Initial storage repair completed, files: ${storageFiles.size}")
-                        } catch (e: Exception) {
-                            Log.e("🔥", "Initial storage repair failed: ${e.message}")
+                            delay(30000)
                         }
                     }
                 }
@@ -461,46 +463,33 @@ class ParentDashboardViewModel(
         database.child("children").child(normalizedChild).child("photoUrl").setValue(finalUrl)
     }
 
-    /** Repair all child images - WITHOUT changing display names! */
     fun repairAllChildImages(storageFiles: List<String>) {
         val normalizedFiles = storageFiles.associateBy {
             it.substringBeforeLast(".").substringAfterLast("/").lowercase().replace(Regex("[^a-z0-9]"), "_")
         }
 
-        // Fetch decommissioned keys once for quick lookups
         database.child("decommissionedKeys").get().addOnSuccessListener { decommissionedSnap ->
             val decommissionedKeys = decommissionedSnap.children.mapNotNull { it.key }.toSet()
 
-            database.child("children").get().addOnSuccessListener { snapshot ->
-                // Process each child WITHOUT changing displayName
+            childrenRef.get().addOnSuccessListener { snapshot ->
                 snapshot.children.forEach { childSnap ->
                     val key = childSnap.key ?: return@forEach
-                    // CRITICAL GUARDRAIL: Skip if this key has been decommissioned
-                    if (decommissionedKeys.contains(key)) {
-                        Log.w("🔥", "Skipping photo repair for decommissioned key: $key")
-                        return@forEach
-                    }
+                    if (decommissionedKeys.contains(key)) return@forEach
 
-                    val displayName = childSnap.child("displayName").getValue(String::class.java)
-                        ?: return@forEach
                     val currentUrl = childSnap.child("photoUrl").getValue(String::class.java).orEmpty()
-
-                    // Use the ACTUAL key, not normalized from displayName
                     val matchedFile = findBestImageMatch(key, normalizedFiles)
                     val verifiedUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
                     else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
 
-                    // Only update photoUrl, NEVER displayName
-                    val shouldUpdate = currentUrl != verifiedUrl
-
-                    if (shouldUpdate) {
-                        childrenRef.child(key).child("photoUrl").setValue(verifiedUrl) // CRITICAL: Target parent-scoped path
-                        Log.d("🔥", "✅ Updated photo for '$key' (displayName: '$displayName') → ${matchedFile ?: "default"}")
+                    if (currentUrl != verifiedUrl) {
+                        childrenRef.child(key).child("photoUrl").setValue(verifiedUrl)
+                        Log.d("🔥", "✅ Photo repair updated '$key' to ${matchedFile ?: "default"}")
                     }
                 }
             }
         }
     }
+
 
     /** Smart family matching - works with separated (ati_una_kuja) AND concatenated (atiunakuja) filenames */
     private fun findBestImageMatch(childName: String, normalizedFiles: Map<String, String>): String? {

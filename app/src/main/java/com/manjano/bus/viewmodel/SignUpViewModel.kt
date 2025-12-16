@@ -242,38 +242,34 @@ class SignUpViewModel : ViewModel() {
                                 storage.root.child("Default Image").child("defaultchild.png")
                             }
 
-                            imageRef.downloadUrl.addOnSuccessListener { uri ->
-                                val photoUrl = uri.toString()
+                            val parentKey = sanitizeKey(parentName)
+                            val childRef = com.google.firebase.database.FirebaseDatabase.getInstance()
+                                .getReference("parents")
+                                .child(parentKey)
+                                .child("children")
+                                .child(childKey)
 
-                                // NEW: Get the parent key from the parentName
-                                val parentKey = sanitizeKey(parentName)
+                            val defaultPhotoUrl = "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
 
-                                // NEW: Change path to /parents/{parentKey}/children/{childKey}
-                                val childRef = com.google.firebase.database.FirebaseDatabase
-                                    .getInstance()
-                                    .getReference("parents") // 👈 New parent node
-                                    .child(parentKey)       // 👈 Parent-specific node
-                                    .child("children")      // 👈 Child collection under parent
-                                    .child(childKey)        // 👈 Child node
+                            imageRef.downloadUrl.addOnCompleteListener { task ->
+                                val finalPhotoUrl = if (task.isSuccessful) task.result.toString() else defaultPhotoUrl
 
                                 val childData = mapOf(
                                     "eta" to "Arriving in 5 minutes",
                                     "active" to true,
                                     "displayName" to childName,
-                                    "photoUrl" to photoUrl,
+                                    "photoUrl" to finalPhotoUrl,
                                     "status" to "On Route",
                                     "messages" to emptyMap<String, Any>()
                                 )
 
                                 childRef.setValue(childData)
                                     .addOnSuccessListener {
-                                        Log.d("🔥", "✅ Saved '$childKey' under parent '$parentKey' with image ${imageRef.name}")
+                                        Log.d("🔥", "✅ Saved '$childKey' for parent '$parentKey'. Image status: ${task.isSuccessful}")
                                     }
                                     .addOnFailureListener { e ->
-                                        Log.e("🔥", "❌ Failed to save '$childKey' for parent '$parentKey': ${e.message}", e)
+                                        Log.e("🔥", "❌ Failed to save child node: ${e.message}")
                                     }
-                            }.addOnFailureListener {
-                                Log.e("🔥", "❌ Failed to get image URL for $childName: ${it.message}")
                             }
                         }
                     }
