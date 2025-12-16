@@ -79,9 +79,6 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.manjano.bus.R
 import kotlinx.coroutines.launch
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.withStyle
 
 data class Child(
     val name: String = "",
@@ -140,33 +137,29 @@ fun ParentDashboardScreen(
     val quickActionExpanded = remember { mutableStateOf(false) }
     val selectedStatus = remember { mutableStateOf(initialStatus) }
 
-    // CRITICAL: Remove all logic relying on splitting the childrenNames parameter string
     val sortedDisplayNamesFromParam = childrenNames.split(",")
         .map { it.replace('+', ' ').trim() }
         .filter { it.isNotEmpty() }
         .sorted()
 
-    // We will use the live list of keys from the ViewModel to determine the initial child.
     val childrenKeys by viewModel.childrenKeys.collectAsState(initial = emptyList())
-    val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
 
-    // Use the *first* name from the *passed* parameter for the initial UI state name,
-    // which will be quickly replaced by the live Firebase data in the next step.
+    // Moved these up so they are visible to the header logic below
+    val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
+    val childrenPhotoMap = remember { mutableStateMapOf<String, String>() }
+
     val initialChildName = sortedDisplayNamesFromParam.firstOrNull() ?: ""
 
-// Create selectedChild state once
     val selectedChild = remember {
-        // Initialize with the first available name (best guess) and the guaranteed default photo URL
         mutableStateOf(
             Child(
                 name = initialChildName,
-                photoUrl = defaultPhotoUrl, // Start with default URL to trigger image loading immediately
+                photoUrl = defaultPhotoUrl,
                 status = initialStatus
             )
         )
     }
 
-// Child dropdown expanded state
     val childExpanded = remember { mutableStateOf(false) }
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -272,25 +265,34 @@ fun ParentDashboardScreen(
                 )
 
                 // FIXED CODE: Handles URL-encoded names and correctly formats a list of first names
-
-                val firstNames = remember(childrenNames) {
-                    childrenNames.split(",")
-                        // 1. Decode URL parameter by replacing '+' with space
-                        .map { it.replace('+', ' ').trim() }
-                        // 2. Extract only the first name (word)
-                        .map { it.split(" ").firstOrNull() ?: it.trim() }
-                        .filter { it.isNotEmpty() }
-                        .distinct() // Ensure unique names in the list
+                val trackingText = remember(childrenDisplayMap.size, childrenDisplayMap.values.toList()) {
+                    // We only want 'Pretty Names'. Keys like 'dan_doto' always have underscores.
+                    val currentNames = childrenDisplayMap.values
+                        .filter { it.isNotEmpty() && it != "Loading..." && !it.contains("_") }
+                        .map { it.trim().split(" ").firstOrNull() ?: it }
+                        .distinct()
                         .sorted()
-                }
 
-                val trackingText = remember(firstNames) {
-                    when (firstNames.size) {
-                        0 -> ""
-                        1 -> "Tracking ${firstNames[0]}"
-                        2 -> "Tracking ${firstNames[0]} & ${firstNames[1]}"
-                        else -> "Tracking " + firstNames.dropLast(1)
-                            .joinToString(", ") + " & ${firstNames.last()}"
+                    if (currentNames.isNotEmpty()) {
+                        when (currentNames.size) {
+                            1 -> "Tracking ${currentNames[0]}"
+                            2 -> "Tracking ${currentNames[0]} & ${currentNames[1]}"
+                            else -> "Tracking " + currentNames.dropLast(1).joinToString(", ") + " & ${currentNames.last()}"
+                        }
+                    } else {
+                        // Fallback only if Firebase is empty
+                        val fallbackNames = childrenNames.split(",")
+                            .map { it.replace('+', ' ').trim().split(" ").firstOrNull() ?: "" }
+                            .filter { it.isNotEmpty() && !it.contains("_") }
+                            .distinct()
+                            .sorted()
+
+                        when (fallbackNames.size) {
+                            0 -> "Tracking..."
+                            1 -> "Tracking ${fallbackNames[0]}"
+                            2 -> "Tracking ${fallbackNames[0]} & ${fallbackNames[1]}"
+                            else -> "Tracking " + fallbackNames.dropLast(1).joinToString(", ") + " & ${fallbackNames.last()}"
+                        }
                     }
                 }
 
@@ -307,27 +309,29 @@ fun ParentDashboardScreen(
 
                 val childrenKeys by viewModel.childrenKeys.collectAsState(initial = emptyList())
                 val sortedChildrenKeys = childrenKeys.sorted()
-                val childrenDisplayMap = remember { mutableStateMapOf<String, String>() }
-                val childrenPhotoMap = remember { mutableStateMapOf<String, String>() }
 
-                // CRITICAL FIX: Merge initial names with live names for full display/tracking coverage
-                val allChildrenNamesForDisplay by remember(childrenKeys, childrenDisplayMap.toMap()) {
+                val allChildrenNamesForDisplay by remember(childrenKeys, childrenDisplayMap.size) {
+                    // 1. Get names from the live display map
+                    // 2. Filter out anything that looks like a raw key (contains underscore)
                     val liveNames = childrenKeys.mapNotNull { key ->
                         childrenDisplayMap[key]
-                    }.toMutableSet()
+                    }.filter { !it.contains("_") && it != "Loading..." }.toSet()
 
-                    if (liveNames.isEmpty()) {
-                        liveNames.addAll(sortedDisplayNamesFromParam)
+                    val namesToDisplay = if (liveNames.isNotEmpty()) {
+                        liveNames.toList().sorted()
+                    } else {
+                        // Only use params if DB is totally empty
+                        sortedDisplayNamesFromParam.filter { !it.contains("_") }
                     }
 
-                    mutableStateOf(liveNames.toList().sorted())
+                    mutableStateOf(namesToDisplay)
                 }
 
                 LaunchedEffect(childrenKeys) {
                     childrenKeys.forEach { key ->
                         scope.launch {
                             viewModel.getDisplayNameFlow(key).collect { displayName ->
-                                if (displayName != "Loading...") {
+                                if (displayName != "Loading..." && displayName.isNotBlank()) {
                                     childrenDisplayMap[key] = displayName
                                 }
                             }
@@ -348,39 +352,30 @@ fun ParentDashboardScreen(
                 }
 
 
-                // Sync selected child's name instantly, prioritizing the first child if none is selected
-                LaunchedEffect(sortedChildrenKeys, childrenDisplayMap.entries) {
+                LaunchedEffect(sortedChildrenKeys, childrenDisplayMap.size) {
                     val currentName = selectedChild.value.name
 
-                    // 1. Determine the target key: Current selection or the first available key.
-                    // Prioritize the key matching the current selection, otherwise default to the first key available for *this* parent.
+                    // Find a key where the display name is a "Pretty Name" (no underscores)
                     val targetKey = sortedChildrenKeys.find { key ->
-                        childrenDisplayMap[key]?.equals(currentName, ignoreCase = true) == true
-                    } ?: sortedChildrenKeys.firstOrNull()
+                        val displayName = childrenDisplayMap[key]
+                        displayName?.equals(currentName, ignoreCase = true) == true && !displayName.contains("_")
+                    } ?: sortedChildrenKeys.firstOrNull { key ->
+                        !(childrenDisplayMap[key]?.contains("_") ?: true)
+                    }
 
                     if (targetKey != null) {
-                        val liveName = childrenDisplayMap[targetKey] ?: targetKey.replace("_", " ").let {
-                            // Fallback to capitalizing the key if display name is still loading
-                            it.split(" ").joinToString(" ") { w -> w.replaceFirstChar { it.uppercase() } }
-                        }
+                        val liveName = childrenDisplayMap[targetKey]
                         val livePhotoUrl = childrenPhotoMap[targetKey] ?: defaultPhotoUrl
 
-                        // 2. Determine if a name update is needed (force update if current name is from the URL param)
-                        val needsUpdate = currentName.isEmpty() || // Forces first selection on load
-                                currentName == initialChildName || // Force update if current name is still the initial URL parameter
-                                selectedChild.value.name != liveName
-
-                        if (needsUpdate) {
-                            selectedChild.value = selectedChild.value.copy(
-                                name = liveName,
-                                photoUrl = livePhotoUrl // Also update photo URL here
-                            )
-                            Log.d("🔥", "Updated selected child to: $liveName (Key: $targetKey)")
+                        // Only update if we have a valid, non-key name
+                        if (liveName != null && !liveName.contains("_") && liveName != "Loading...") {
+                            if (currentName != liveName) {
+                                selectedChild.value = selectedChild.value.copy(
+                                    name = liveName,
+                                    photoUrl = livePhotoUrl
+                                )
+                            }
                         }
-                    }
-                    // Ghost cleanup
-                    else if (currentName.isNotEmpty()) {
-                        selectedChild.value = Child(name = "", photoUrl = defaultPhotoUrl, status = initialStatus)
                     }
                 }
 
@@ -427,8 +422,10 @@ fun ParentDashboardScreen(
                         // FIX: Loop over all consolidated names for full coverage
                         allChildrenNamesForDisplay.forEach { displayFullName ->
                             // Use the live map to get the photo URL if available, otherwise use default
-                            val key = childrenKeys.find { childrenDisplayMap[it] == displayFullName }
-                            val livePhotoUrl = if (key != null) childrenPhotoMap[key] else defaultPhotoUrl
+                            val key =
+                                childrenKeys.find { childrenDisplayMap[it] == displayFullName }
+                            val livePhotoUrl =
+                                if (key != null) childrenPhotoMap[key] else defaultPhotoUrl
 
                             DropdownMenuItem(
                                 text = {
@@ -442,7 +439,8 @@ fun ParentDashboardScreen(
                                     // Update selectedChild with the display name and the best available photo URL
                                     selectedChild.value = selectedChild.value.copy(
                                         name = displayFullName,
-                                        photoUrl = livePhotoUrl ?: defaultPhotoUrl // Ensure default if livePhotoUrl is null
+                                        photoUrl = livePhotoUrl
+                                            ?: defaultPhotoUrl // Ensure default if livePhotoUrl is null
                                     )
                                     childExpanded.value = false
                                 }
@@ -451,7 +449,7 @@ fun ParentDashboardScreen(
                     }
                 }
 
-               Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
                 // ETA text state
                 var etaText by remember { mutableStateOf("Loading...") }
@@ -470,7 +468,10 @@ fun ParentDashboardScreen(
                         val normalizedKey = key.lowercase()
                         normalizedKey == normalizedSelectedName ||
                                 // Also check if any display name matches (from childrenDisplayMap collected earlier)
-                                childrenDisplayMap[key]?.equals(selectedChild.value.name, ignoreCase = true) == true
+                                childrenDisplayMap[key]?.equals(
+                                    selectedChild.value.name,
+                                    ignoreCase = true
+                                ) == true
                     }
                 }
 
@@ -592,7 +593,8 @@ fun ParentDashboardScreen(
                 Spacer(modifier = Modifier.height(uiSizes.verticalSpacing))
 
 // Live bus location from Firebase (real-time)
-                val busLocation by viewModel.getBusFlow("busLocation").collectAsState(initial = LatLng(-1.2921, 36.8219))
+                val busLocation by viewModel.getBusFlow("busLocation")
+                    .collectAsState(initial = LatLng(-1.2921, 36.8219))
 
 // Initial position set immediately (uses GMS CameraPosition import)
                 val cameraPositionState = rememberCameraPositionState {
@@ -626,7 +628,7 @@ fun ParentDashboardScreen(
                     )
                 }
 
-              Spacer(modifier = Modifier.height(8.dp)) // small gap from map
+                Spacer(modifier = Modifier.height(8.dp)) // small gap from map
 
                 Box(
                     modifier = Modifier
@@ -747,7 +749,9 @@ fun ParentDashboardScreen(
                                     .fillMaxWidth()
                                     .height(if (uiSizes.isTablet) 120.dp else 100.dp)
                                     .align(Alignment.TopStart)
-                                    .semantics { contentDescription = "Message input, max 300 characters" },
+                                    .semantics {
+                                        contentDescription = "Message input, max 300 characters"
+                                    },
                                 textStyle = TextStyle(
                                     color = Color.Black,
                                     fontSize = if (uiSizes.isTablet) 16.sp else 14.sp
