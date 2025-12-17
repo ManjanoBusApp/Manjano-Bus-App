@@ -53,8 +53,37 @@ class ParentDashboardViewModel(
     private val _childrenKeys = MutableStateFlow<List<String>>(emptyList())
     val childrenKeys: StateFlow<List<String>> = _childrenKeys
      // CRITICAL FIX: Define childrenRef as a custom getter that reads the *current value* of the key flow
+     private val parentRef: DatabaseReference
+         get() = database.child("parents").child(_parentKey.value)
+
     private val childrenRef: DatabaseReference
-        get() = database.child("parents").child(_parentKey.value).child("children")
+        get() = parentRef.child("children")
+
+    fun initializeParent(rawParentName: String) {
+        val newParentKey = sanitizeKey(rawParentName)
+        if (_parentKey.value.isEmpty()) {
+            _parentKey.value = newParentKey
+            Log.d("🔥", "ViewModel parent key set to: $newParentKey")
+
+            // 1. Write the displayName immediately under the parent node
+            parentRef.child("_displayName").setValue(rawParentName)
+
+            // 2. Observe the parent displayName like children
+            parentRef.child("_displayName").addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val displayName = snapshot.getValue(String::class.java) ?: rawParentName
+                    _parentDisplayName.value = displayName
+                }
+
+                override fun onCancelled(error: DatabaseError) { }
+            })
+        }
+    }
+
+
+    private val _parentDisplayName = MutableStateFlow("")
+    val parentDisplayName: StateFlow<String> get() = _parentDisplayName
+
     private val childrenEventListener = object : ChildEventListener {
         override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
@@ -201,15 +230,6 @@ class ParentDashboardViewModel(
     }
 
 
-    /** MUST be called immediately after ViewModel creation to set the user context. */
-    fun initializeParent(rawParentName: String) {
-        val newParentKey = sanitizeKey(rawParentName)
-        if (_parentKey.value.isEmpty()) {
-            _parentKey.value = newParentKey
-            Log.d("🔥", "ViewModel parent key set to: $newParentKey")
-
-           }
-    }
     private fun observeBusLocation() {
         val busRef = database.child("busLocation")
         busRef.addValueEventListener(object : ValueEventListener {
