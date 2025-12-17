@@ -240,16 +240,15 @@ fun ParentDashboardScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
-                // NEW CODE for "Hello" Greeting (FIXED: Handles URL-encoded names like "John+Doe")
-                val displayParentName = remember(parentName) {
-                    // 1. Replace "+" with a space (decoding URL param)
-                    // 2. Trim whitespace
-                    // 3. Split by space and take the first name only
-                    parentName
+                val liveParentName by viewModel.parentDisplayName.collectAsState()
+
+                val displayParentName = remember(liveParentName, parentName) {
+                    val nameToProcess = if (liveParentName.isNotEmpty()) liveParentName else parentName
+                    nameToProcess
                         .replace('+', ' ')
                         .trim()
                         .split(" ")
-                        .firstOrNull() ?: parentName // Fallback to original if something goes wrong
+                        .firstOrNull() ?: nameToProcess
                 }
 
                 Text(

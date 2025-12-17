@@ -46,3 +46,5 @@ npm-debug.log
 *.dex
 captures/
 output.json
+gradle-*/
+
