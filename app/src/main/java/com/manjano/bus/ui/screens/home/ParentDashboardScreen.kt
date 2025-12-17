@@ -165,18 +165,38 @@ fun ParentDashboardScreen(
     val scope = rememberCoroutineScope()
     var storageFiles by remember { mutableStateOf<List<String>>(emptyList()) }
 
-    LaunchedEffect(Unit) {
-        val storage =
-            com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
-        storage.listAll().addOnSuccessListener { listResult ->
-            storageFiles = listResult.items.map { it.name }
-            Log.d("ParentDashboard", "✅ Listed ${storageFiles.size} files from Storage")
-            // Repair is now done ONLY once in the ViewModel on startup – we no longer call it from the screen
-        }.addOnFailureListener {
-            Log.e("ParentDashboard", "❌ Failed to list files from Storage", it)
+    LaunchedEffect(childrenKeys) {
+        childrenKeys.forEach { key ->
+            scope.launch {
+                viewModel.getDisplayNameFlow(key).collect { displayName ->
+                    if (displayName != "Loading..." && displayName.isNotBlank()) {
+                        childrenDisplayMap[key] = displayName
+                    }
+                }
+            }
+
+            scope.launch {
+                viewModel.getPhotoUrlFlow(key).collect { url ->
+                    val normalizedUrl = url.orEmpty()
+                    val finalUrl = if (normalizedUrl.isBlank() || normalizedUrl == "null" || normalizedUrl.contains("defaultchild.png")) {
+                        defaultPhotoUrl
+                    } else {
+                        normalizedUrl
+                    }
+
+                    childrenPhotoMap[key] = finalUrl
+
+                    if (selectedChild.value.name == childrenDisplayMap[key]) {
+                        selectedChild.value = selectedChild.value.copy(photoUrl = finalUrl)
+                    }
+
+                    if (finalUrl == defaultPhotoUrl) {
+                        viewModel.monitorStorageForChildImage(key)
+                    }
+                }
+            }
         }
     }
-
 
     val configuration = LocalConfiguration.current
     val screenWidthDp = configuration.screenWidthDp.dp

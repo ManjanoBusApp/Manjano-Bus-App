@@ -20,6 +20,7 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.tasks.await
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import com.google.firebase.storage.StorageException
 
 /** Sanitizes a string to be used as a Firebase Realtime Database key.
  * Converts to lowercase and replaces non-alphanumeric characters with underscores.
@@ -219,27 +220,60 @@ class ParentDashboardViewModel(
                         autoCleanupDuplicates()
                     }
 
-                    viewModelScope.launch {
+                    viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
                         while (true) {
                             try {
-                                val storage =
-                                    com.google.firebase.storage.FirebaseStorage.getInstance().reference.child(
-                                        "Children Images"
-                                    )
-                                val listResult =
-                                    com.google.android.gms.tasks.Tasks.await(storage.listAll())
-                                repairAllChildImages(listResult.items.map { it.name })
+                                val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
+                                val listResult = com.google.android.gms.tasks.Tasks.await(storage.listAll())
+                                val rawFileNames = listResult.items.map { it.name }
+                                repairAllChildImages(rawFileNames)
                             } catch (e: Exception) {
-                                Log.e("🔥", "Storage repair error: ${e.message}")
+                                android.util.Log.e("🔥", "Background Storage Monitor Error: ${e.message}")
                             }
-                            delay(30000)
+                            kotlinx.coroutines.delay(10000)
                         }
                     }
                 }
             }
         }
     }
-    
+
+    fun monitorStorageForChildImage(childKey: String) {
+        if (activeStorageMonitors.contains(childKey)) return
+        activeStorageMonitors.add(childKey)
+
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val storageRef = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images/$childKey.png")
+
+            liveParentKey.collectLatest { pKey ->
+                if (pKey.isBlank()) return@collectLatest
+
+                var imageFound = false
+                while (!imageFound) {
+                    try {
+                        val url = storageRef.downloadUrl.await().toString()
+
+                        database.child("parents")
+                            .child(pKey)
+                            .child("children")
+                            .child(childKey)
+                            .child("photoUrl")
+                            .setValue(url)
+                            .await()
+
+                        imageFound = true
+                        activeStorageMonitors.remove(childKey)
+                    } catch (e: Exception) {
+                        kotlinx.coroutines.delay(5000L)
+                    }
+                }
+            }
+        }
+    }
+
+    // Inside your ViewModel:
+    private val activeStorageMonitors = mutableSetOf<String>()
+
     fun getValidChildNames(): StateFlow<List<String>> {
         val result = MutableStateFlow<List<String>>(emptyList())
 
@@ -373,8 +407,6 @@ class ParentDashboardViewModel(
             val oldData = snapshot.value as? Map<*, *> ?: return@addOnSuccessListener
             val updatedData = oldData.toMutableMap()
 
-            val newDisplayName = updatedData["displayName"] as? String ?: ""
-
             childrenRef.child(newKey).setValue(updatedData).addOnSuccessListener {
                 viewModelScope.launch {
                     val storage = com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
@@ -385,16 +417,13 @@ class ParentDashboardViewModel(
                         }
 
                         val matchedFile = findBestImageMatch(newKey, normalizedFiles)
-                        val verifiedUrl = if (matchedFile == null) {
-                            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
-                        } else {
-                            "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
-                        }
+                        val encodedFileName = if (matchedFile != null) android.net.Uri.encode(matchedFile) else null
+                        val verifiedUrl = if (encodedFileName == null) DEFAULT_CHILD_PHOTO_URL
+                        else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$encodedFileName?alt=media"
 
                         childrenRef.child(newKey).child("photoUrl").setValue(verifiedUrl).addOnCompleteListener {
                             childrenRef.child(oldKey).removeValue().addOnSuccessListener {
                                 database.child("decommissionedKeys").child(oldKey).setValue(true)
-
                                 _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
                                     remove(oldKey)
                                     if (!contains(newKey)) add(newKey)
@@ -410,6 +439,7 @@ class ParentDashboardViewModel(
             }
         }
     }
+
     private fun ViewModel.addCloseableListener(
         ref: DatabaseReference,
         listener: ValueEventListener
@@ -524,99 +554,55 @@ class ParentDashboardViewModel(
     }
 
     fun repairAllChildImages(storageFiles: List<String>) {
-        val normalizedFiles = storageFiles.associateBy {
-            it.substringBeforeLast(".").substringAfterLast("/").lowercase().replace(Regex("[^a-z0-9]"), "_")
+        val normalizedFiles = storageFiles.associateBy { fileName ->
+            fileName.substringBeforeLast(".").lowercase().trim().replace(Regex("[^a-z0-9]"), "_")
         }
 
-        database.child("decommissionedKeys").get().addOnSuccessListener { decommissionedSnap ->
-            val decommissionedKeys = decommissionedSnap.children.mapNotNull { it.key }.toSet()
+        childrenRef.get().addOnSuccessListener { snapshot ->
+            if (!snapshot.exists()) return@addOnSuccessListener
 
-            childrenRef.get().addOnSuccessListener { snapshot ->
-                snapshot.children.forEach { childSnap ->
-                    val key = childSnap.key ?: return@forEach
-                    if (decommissionedKeys.contains(key)) return@forEach
+            snapshot.children.forEach { childSnap ->
+                val key = childSnap.key ?: return@forEach
+                val currentUrl = childSnap.child("photoUrl").getValue(String::class.java).orEmpty()
+                val matchedFileName = findBestImageMatch(key, normalizedFiles)
 
-                    val currentUrl = childSnap.child("photoUrl").getValue(String::class.java).orEmpty()
-                    val matchedFile = findBestImageMatch(key, normalizedFiles)
-                    val verifiedUrl = if (matchedFile == null) DEFAULT_CHILD_PHOTO_URL
-                    else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$matchedFile?alt=media"
+                if (matchedFileName != null) {
+                    val encodedName = android.net.Uri.encode(matchedFileName)
+                    val newUrl = "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$encodedName?alt=media"
 
-                    if (currentUrl != verifiedUrl) {
-                        childrenRef.child(key).child("photoUrl").setValue(verifiedUrl)
-                        Log.d("🔥", "✅ Photo repair updated '$key' to ${matchedFile ?: "default"}")
+                    if (currentUrl != newUrl) {
+                        childrenRef.child(key).child("photoUrl").setValue(newUrl).addOnSuccessListener {
+                            Log.d("🔥", "AUTO-DETECT: Image updated for $key")
+                        }
+                    }
+                } else {
+                    if (!currentUrl.contains("defaultchild.png") && currentUrl.isNotBlank() && currentUrl != "null") {
+                        childrenRef.child(key).child("photoUrl").setValue(DEFAULT_CHILD_PHOTO_URL).addOnSuccessListener {
+                            Log.d("🔥", "AUTO-CLEAN: Image missing from storage for $key. Reverted to default.")
+                        }
                     }
                 }
             }
         }
     }
 
-
     /** Smart family matching - works with separated (ati_una_kuja) AND concatenated (atiunakuja) filenames */
-    private fun findBestImageMatch(childName: String, normalizedFiles: Map<String, String>): String? {
-        val childParts = childName.split("_")
-            .filter { it.isNotBlank() }
-            .map { it.lowercase() }
+    private fun findBestImageMatch(childKey: String, normalizedFiles: Map<String, String>): String? {
+        val cleanKey = childKey.lowercase().trim()
 
-        if (childParts.isEmpty()) return null
+        if (normalizedFiles.containsKey(cleanKey)) return normalizedFiles[cleanKey]
 
-        val sortedFiles = normalizedFiles.entries.sortedBy { it.key }
-
-        for ((imageKey, originalFileName) in sortedFiles) {
-            val imageLower = imageKey.lowercase()
-            val imageParts = imageLower.split("_").filter { it.isNotBlank() }
-
-            val isConcatenated = imageParts.size == 1 && imageLower.length > 5
-            val concatenatedName = if (isConcatenated) imageLower else null
-
-            // Extract full names and initials, handling both separated and concatenated names
-            val imageFullNames = imageParts.filter { it.length > 1 }.toSet()
-            val imageInitials = if (isConcatenated) {
-                // For concatenated names, extract initials from actual names found in child parts
-                val concatenated = imageParts[0]
-                val foundInitials = mutableSetOf<String>()
-
-                // Check for each child part that's a full name in the concatenated string
-                for (childPart in childParts) {
-                    if (childPart.length > 1 && concatenated.contains(childPart)) {
-                        foundInitials.add(childPart.first().toString())
-                    }
-                }
-                foundInitials
-            } else {
-                // For separated names, use normal initial extraction
-                imageFullNames.map { it.first().toString() }.toSet()
-            }
-            var fullNameMatches = 0
-            var initialMatches = 0
-
-            for (part in childParts) {
-                if (part.length > 1) {
-                    val normalMatch = imageFullNames.contains(part)
-                    val concatMatch = concatenatedName?.contains(part) == true
-                    if (normalMatch || concatMatch) {
-                        fullNameMatches++
-                    }
-                } else if (part.length == 1) {
-                    if (imageInitials.contains(part)) {
-                        initialMatches++
-                    }
-                }
-            }
-
-            val rulePassed = fullNameMatches >= 2 ||
-                    (fullNameMatches == 2 && initialMatches >= 1) ||
-                    (fullNameMatches == 1 && initialMatches >= 2)
-
-// DEBUG LOG — prints ONLY when matching fails (so log stays clean even with 1000+ images)
-            if (!rulePassed) {
-                Log.d("🔥", "MATCH FAILED | child: $childName | image: $imageKey | full: $fullNameMatches | init: $initialMatches | initials: $imageInitials | concatenated: $isConcatenated")
-            }
-
-            if (rulePassed) {
-                return originalFileName
-            }
+        val fuzzyMatch = normalizedFiles.entries.find { (imgKey, _) ->
+            imgKey == cleanKey || imgKey.replace("_", "").contains(cleanKey.replace("_", "")) || cleanKey.replace("_", "").contains(imgKey.replace("_", ""))
         }
-        return null
+        if (fuzzyMatch != null) return fuzzyMatch.value
+
+        val parts = cleanKey.split("_").filter { it.length >= 2 }
+        if (parts.isEmpty()) return null
+
+        return normalizedFiles.entries.find { (imgKey, _) ->
+            parts.all { part -> imgKey.contains(part) }
+        }?.value
     }
 
     /** Observe photoUrl flow - purely observational, no creation, no initial await() */

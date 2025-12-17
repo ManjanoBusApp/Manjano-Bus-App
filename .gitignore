@@ -2,7 +2,6 @@
 /build/
 /.gradle/
 /local.properties
-/.idea/
 /.cxx/
 
 # IntelliJ/Android Studio
@@ -25,11 +24,10 @@
 Thumbs.db
 
 # Firebase/Google Services (keep JSON if needed)
-# google-services.json   <-- uncomment if you don’t want to commit it
+# google-services.json
 
 # NDK/Build cache
 .externalNativeBuild/
-.cxx/
 
 # Jetpack Compose preview cache
 .idea/assetWizardSettings.xml
@@ -46,5 +44,8 @@ npm-debug.log
 *.dex
 captures/
 output.json
-gradle-*/
 
+# Gradle wrapper and local Gradle distributions
+gradle/wrapper/gradle-wrapper.jar
+gradle-*/
+gradle-8.13/
