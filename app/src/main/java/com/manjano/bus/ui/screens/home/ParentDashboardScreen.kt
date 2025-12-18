@@ -633,21 +633,20 @@ fun ParentDashboardScreen(
 
                 Spacer(modifier = Modifier.height(uiSizes.verticalSpacing))
 
-// Live bus location from Firebase (real-time)
                 val busLocation by viewModel.getBusFlow("busLocation")
-                    .collectAsState(initial = LatLng(-1.2921, 36.8219))
+                    .collectAsState(initial = LatLng(-1.3815977, 36.9395961))
 
-// Initial position set immediately (uses GMS CameraPosition import)
                 val cameraPositionState = rememberCameraPositionState {
                     position = CameraPosition.fromLatLngZoom(busLocation, 15f)
                 }
 
-// Automatically follow the bus when location changes
                 LaunchedEffect(busLocation) {
-                    cameraPositionState.animate(
-                        CameraUpdateFactory.newLatLngZoom(busLocation, 15f),
-                        1000  // durationMs is optional; this works in v4.4.1
-                    )
+                    if (busLocation.latitude != 0.0 && busLocation.longitude != 0.0) {
+                        cameraPositionState.animate(
+                            update = CameraUpdateFactory.newLatLng(busLocation),
+                            durationMs = 1500
+                        )
+                    }
                 }
 
                 GoogleMap(

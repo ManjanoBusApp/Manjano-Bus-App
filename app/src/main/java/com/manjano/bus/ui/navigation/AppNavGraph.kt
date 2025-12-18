@@ -21,6 +21,7 @@ import java.net.URLDecoder
 import java.nio.charset.StandardCharsets
 import androidx.navigation.NavType
 import com.manjano.bus.viewmodel.SignUpViewModel
+import com.manjano.bus.ui.screens.home.DriverDashboardViewModel
 
 
 @Composable
@@ -98,7 +99,11 @@ fun AppNavGraph(navController: NavHostController) {
         }
 
         composable("driver_dashboard") { _: NavBackStackEntry ->
-            DriverDashboardScreen(navController = navController)
+            val driverViewModel: DriverDashboardViewModel = hiltViewModel()
+            DriverDashboardScreen(
+                navController = navController,
+                viewModel = driverViewModel
+            )
         }
 
         composable("admin_dashboard") { _: NavBackStackEntry ->
