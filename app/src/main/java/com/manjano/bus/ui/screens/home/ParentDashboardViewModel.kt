@@ -147,13 +147,9 @@ class ParentDashboardViewModel(
 
         override fun onChildRemoved(snapshot: DataSnapshot) {
             val key = snapshot.key ?: return
-            viewModelScope.launch {
-                _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
-                    if (remove(key)) {
-                        Log.d("🔥", "childrenEventListener: onChildRemoved -> $key")
-                    }
-                }
-            }
+            // Filter the existing list to remove the deleted key immediately
+            _childrenKeys.value = _childrenKeys.value.filter { it != key }
+            Log.d("🔥", "Manual or Parent Entry Removed: $key")
         }
 
         override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) { /* ignore */

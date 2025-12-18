@@ -166,8 +166,17 @@ fun ParentDashboardScreen(
     var storageFiles by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(childrenKeys) {
+        // 1. CLEANUP: If a key is no longer in Firebase (childrenKeys), remove it from our UI maps
+        val currentKeysSet = childrenKeys.toSet()
+        val keysToPurge = childrenDisplayMap.keys.filter { it !in currentKeysSet }
+
+        keysToPurge.forEach { key ->
+            childrenDisplayMap.remove(key)
+            childrenPhotoMap.remove(key)
+        }
+
+        // 2. RE-OBSERVE: Ensure all existing keys have active listeners
         childrenKeys.forEach { key ->
-            // 1. Observe Display Name
             scope.launch {
                 viewModel.getDisplayNameFlow(key).collect { displayName ->
                     if (displayName != "Loading..." && displayName.isNotBlank()) {
@@ -176,7 +185,6 @@ fun ParentDashboardScreen(
                 }
             }
 
-            // 2. Observe Photo URL
             scope.launch {
                 viewModel.getPhotoUrlFlow(key).collect { url ->
                     val finalUrl = if (url.isBlank() || url == "null" || url.contains("defaultchild.png")) {
@@ -186,12 +194,10 @@ fun ParentDashboardScreen(
                     }
                     childrenPhotoMap[key] = finalUrl
 
-                    // If this is the currently selected child, update the main image immediately
                     if (selectedChild.value.name == childrenDisplayMap[key]) {
                         selectedChild.value = selectedChild.value.copy(photoUrl = finalUrl)
                     }
 
-                    // If still default, check if an image has been uploaded to storage
                     if (finalUrl == defaultPhotoUrl) {
                         viewModel.monitorStorageForChildImage(key)
                     }
