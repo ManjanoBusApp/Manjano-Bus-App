@@ -8,9 +8,10 @@ import com.manjano.bus.ui.ManjanoAppUI
 import com.manjano.bus.ui.theme.ManjanoTheme
 import android.util.Log
 import dagger.hilt.android.AndroidEntryPoint
+import androidx.fragment.app.FragmentActivity
 
 @AndroidEntryPoint
-class MainActivity : ComponentActivity() {
+class MainActivity : androidx.fragment.app.FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d("🔥", "🔧 MainActivity onCreate called")

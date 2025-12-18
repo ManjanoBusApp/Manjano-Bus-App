@@ -61,7 +61,9 @@ fun DashboardContent(
     viewModel: DriverDashboardViewModel
 ) {
     val isTracking by viewModel.isTracking.collectAsState()
+    val students by viewModel.studentList.collectAsState()
     val beijingRoad = LatLng(-1.3815977, 36.9395961)
+
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(beijingRoad, 15f)
     }
@@ -89,7 +91,6 @@ fun DashboardContent(
                 )
                 HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
 
-                val students = listOf("John Doe", "Jane Smith", "Alex Munene", "Sarah Wambui")
                 students.forEach { student ->
                     Row(
                         modifier = Modifier
@@ -98,16 +99,49 @@ fun DashboardContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = student,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = Color.DarkGray
-                        )
+                        Column {
+                            Text(
+                                text = student.name,
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = Color.Black
+                            )
+                            Text(
+                                text = student.stop,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        }
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        val activity = context as androidx.fragment.app.FragmentActivity
+
                         Button(
-                            onClick = { },
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE91E63))
+                            onClick = {
+                                val executor = androidx.core.content.ContextCompat.getMainExecutor(context)
+                                val biometricPrompt = androidx.biometric.BiometricPrompt(
+                                    activity,
+                                    executor,
+                                    object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
+                                        override fun onAuthenticationSucceeded(result: androidx.biometric.BiometricPrompt.AuthenticationResult) {
+                                            super.onAuthenticationSucceeded(result)
+                                            viewModel.markStudentAsBoarded(student.id)
+                                        }
+                                    }
+                                )
+
+                                val promptInfo = androidx.biometric.BiometricPrompt.PromptInfo.Builder()
+                                    .setTitle("Student Verification")
+                                    .setSubtitle("Scan finger to confirm boarding")
+                                    .setNegativeButtonText("Cancel")
+                                    .build()
+
+                                biometricPrompt.authenticate(promptInfo)
+                            },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (student.status == "Boarded") Color.Gray else Color(0xFFE91E63)
+                            ),
+                            enabled = student.status != "Boarded"
                         ) {
-                            Text("Scan")
+                            Text(if (student.status == "Boarded") "Boarded" else "Scan")
                         }
                     }
                 }

@@ -100,6 +100,7 @@ dependencies {
     implementation(libs.play.services.location)
     implementation("com.google.accompanist:accompanist-permissions:0.34.0")
     implementation(libs.accompanist.permissions)
+    implementation(libs.androidx.biometric)
 }
 
 
