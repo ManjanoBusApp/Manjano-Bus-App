@@ -110,13 +110,25 @@ class ParentDashboardViewModel(
     private val childrenEventListener = object : ChildEventListener {
         override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
-            viewModelScope.launch {
-                _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
-                    if (!contains(key)) {
-                        add(key)
-                        Log.d("🔥", "childrenEventListener: onChildAdded -> $key")
-                    }
-                }
+
+            // 1. Check if the node is empty or missing structure
+            if (!snapshot.hasChild("displayName")) {
+                val rawName = key.replace("_", " ").split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
+                val defaultData = mapOf(
+                    "active" to true,
+                    "displayName" to rawName,
+                    "eta" to "Arriving in 5 minutes",
+                    "photoUrl" to DEFAULT_CHILD_PHOTO_URL,
+                    "status" to "On Route"
+                )
+                // 2. Automatically inject the structure into Firebase
+                childrenRef.child(key).updateChildren(defaultData)
+            }
+
+            // 3. Update the UI list
+            if (!_childrenKeys.value.contains(key)) {
+                _childrenKeys.value = _childrenKeys.value + key
+                Log.d("🔥", "Detected and Auto-Formatted manual entry: $key")
             }
         }
 

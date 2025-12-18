@@ -167,6 +167,7 @@ fun ParentDashboardScreen(
 
     LaunchedEffect(childrenKeys) {
         childrenKeys.forEach { key ->
+            // 1. Observe Display Name
             scope.launch {
                 viewModel.getDisplayNameFlow(key).collect { displayName ->
                     if (displayName != "Loading..." && displayName.isNotBlank()) {
@@ -175,21 +176,22 @@ fun ParentDashboardScreen(
                 }
             }
 
+            // 2. Observe Photo URL
             scope.launch {
                 viewModel.getPhotoUrlFlow(key).collect { url ->
-                    val normalizedUrl = url.orEmpty()
-                    val finalUrl = if (normalizedUrl.isBlank() || normalizedUrl == "null" || normalizedUrl.contains("defaultchild.png")) {
+                    val finalUrl = if (url.isBlank() || url == "null" || url.contains("defaultchild.png")) {
                         defaultPhotoUrl
                     } else {
-                        normalizedUrl
+                        url
                     }
-
                     childrenPhotoMap[key] = finalUrl
 
+                    // If this is the currently selected child, update the main image immediately
                     if (selectedChild.value.name == childrenDisplayMap[key]) {
                         selectedChild.value = selectedChild.value.copy(photoUrl = finalUrl)
                     }
 
+                    // If still default, check if an image has been uploaded to storage
                     if (finalUrl == defaultPhotoUrl) {
                         viewModel.monitorStorageForChildImage(key)
                     }
