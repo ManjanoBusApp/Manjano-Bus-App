@@ -1,10 +1,22 @@
-# Android build files
-/build/
-/.gradle/
-/local.properties
-/.cxx/
+# =========================
+# Android / Gradle
+# =========================
+.gradle/
+build/
+local.properties
+.gradle-cache/
+.externalNativeBuild/
+captures/
+output.json
 
-# IntelliJ/Android Studio
+# Gradle wrapper and distributions
+gradle/wrapper/gradle-wrapper.jar
+gradle-*/
+gradle-*.zip
+
+# =========================
+# IDE / IntelliJ / Android Studio
+# =========================
 *.iml
 .idea/*
 !/.idea/gradle.xml
@@ -12,40 +24,42 @@
 !/.idea/runConfigurations
 !/.idea/vcs.xml
 
-# Kotlin
-*.kotlin_module
-
-# Log and crash files
-*.log
-*.hprof
-
-# OS junk files
-.DS_Store
-Thumbs.db
-
-# Firebase/Google Services (keep JSON if needed)
-# google-services.json
-
-# NDK/Build cache
-.externalNativeBuild/
-
 # Jetpack Compose preview cache
 .idea/assetWizardSettings.xml
 .idea/deploymentTargetDropDown.xml
 .idea/markdown-navigator.xml
 
-# Node, React Native (if added)
+# =========================
+# Kotlin
+# =========================
+*.kotlin_module
+
+# =========================
+# Logs, crash reports
+# =========================
+*.log
+*.hprof
+
+# =========================
+# OS junk files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Firebase / Google Services
+# =========================
+# google-services.json  # keep if needed
+
+# =========================
+# Node / React Native (if added)
+# =========================
 node_modules/
 npm-debug.log
 
-# Misc
+# =========================
+# Misc / binaries
+# =========================
 *.apk
 *.ap_
 *.dex
-captures/
-output.json
-
-# Gradle wrapper and local Gradle distributions
-gradle/wrapper/gradle-wrapper.jar
-gradle-*/
-gradle-8.13/
