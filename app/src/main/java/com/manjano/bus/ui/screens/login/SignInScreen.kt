@@ -79,19 +79,26 @@ fun SignInScreen(
 
     LaunchedEffect(uiState.navigateToDashboard) {
         if (uiState.navigateToDashboard) {
-            val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
-            val parentName = prefs.getString("parent_name", "") ?: ""
-            val childrenNames = prefs.getString("children_names", "") ?: ""
-            val parentFirstName = parentName.split(" ").firstOrNull() ?: parentName
-            val encodedParent = URLEncoder.encode(parentFirstName, StandardCharsets.UTF_8.toString())
-            val encodedChildren = URLEncoder.encode(childrenNames, StandardCharsets.UTF_8.toString())
-            val encodedStatus = URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
-            navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
-                popUpTo("signin/parent") { inclusive = true }
+            if (role == "driver") {
+                navController.navigate("driver_dashboard") {
+                    popUpTo("signin/driver") { inclusive = true }
+                }
+            } else {
+                val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                val parentName = prefs.getString("parent_name", "") ?: ""
+                val childrenNames = prefs.getString("children_names", "") ?: ""
+                val parentFirstName = parentName.split(" ").firstOrNull() ?: parentName
+                val encodedParent = URLEncoder.encode(parentFirstName, StandardCharsets.UTF_8.toString())
+                val encodedChildren = URLEncoder.encode(childrenNames, StandardCharsets.UTF_8.toString())
+                val encodedStatus = URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
+                navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
+                    popUpTo("signin/parent") { inclusive = true }
+                }
             }
             viewModel.onNavigationConsumed()
         }
     }
+
     Scaffold(modifier = Modifier.fillMaxSize()) { paddingValues ->
         Column(
             modifier = Modifier
@@ -235,16 +242,6 @@ fun SignInScreen(
 
             Button(
                 onClick = {
-                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                    scope.launch {
-                        repeat(3) {
-                            continueShakeOffset.floatValue = 8f
-                            delay(25)
-                            continueShakeOffset.floatValue = -8f
-                            delay(25)
-                        }
-                        continueShakeOffset.floatValue = 0f
-                    }
                     keyboardController?.hide()
                     focusManager.clearFocus()
                     showValidationError = false
@@ -258,7 +255,6 @@ fun SignInScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
-                    .offset(x = continueShakeOffset.floatValue.dp)
             ) {
                 Text(
                     text = if (uiState.isOtpSubmitting) "Sending..." else "Continue",

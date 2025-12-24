@@ -14,16 +14,28 @@ data class Student(
     val name: String = "",
     val stop: String = "",
     val status: String = "Waiting",
-    val busAssigned: String = ""
+    val busAssigned: String = "",
+    val fingerprintId: Int? = null
 )
 
 @HiltViewModel
 class DriverDashboardViewModel @Inject constructor(
-    private val fusedLocationClient: FusedLocationProviderClient
+    private val fusedLocationClient: FusedLocationProviderClient,
+    @dagger.hilt.android.qualifiers.ApplicationContext private val context: android.content.Context
 ) : ViewModel() {
 
     private val database = FirebaseDatabase.getInstance().reference
     private var currentBusId: String = "bus_001"
+    private var tts: android.speech.tts.TextToSpeech? = null
+
+    init {
+        tts = android.speech.tts.TextToSpeech(context) { status ->
+            if (status != android.speech.tts.TextToSpeech.ERROR) {
+                tts?.language = java.util.Locale.US
+            }
+        }
+        fetchAssignedStudents()
+    }
 
     private val _isTracking = MutableStateFlow(false)
     val isTracking = _isTracking.asStateFlow()
@@ -35,8 +47,8 @@ class DriverDashboardViewModel @Inject constructor(
         override fun onLocationResult(result: LocationResult) {
             result.lastLocation?.let { location ->
                 val updates = mapOf(
-                    "latitude" to location.latitude,
-                    "longitude" to location.longitude,
+                    "lat" to location.latitude,
+                    "lng" to location.longitude,
                     "timestamp" to System.currentTimeMillis()
                 )
                 database.child("busLocations").child(currentBusId).setValue(updates)
@@ -48,20 +60,28 @@ class DriverDashboardViewModel @Inject constructor(
         database.child("students").child(studentId).child("status").setValue("Boarded")
     }
 
+    fun onFingerprintScanned(hardwareId: Int?) {
+        if (hardwareId == null) return
+        val student = _studentList.value.find { it.fingerprintId == hardwareId }
+        student?.let {
+            markStudentAsBoarded(it.id)
+            tts?.speak(
+                "${it.name} has boarded",
+                android.speech.tts.TextToSpeech.QUEUE_FLUSH,
+                null,
+                null
+            )
+            android.util.Log.d("HARDWARE_SCAN", "Successfully Boarded: ${it.name}")
+        }
+    }
+
     fun setBusId(newBusId: String) {
         currentBusId = newBusId
         fetchAssignedStudents()
     }
 
-    init {
-        seedDatabaseWithStudents()
-        fetchAssignedStudents()
-    }
-
     private fun fetchAssignedStudents() {
         database.child("students")
-            .orderByChild("busAssigned")
-            .equalTo(currentBusId)
             .addValueEventListener(object : com.google.firebase.database.ValueEventListener {
                 override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                     val list = mutableListOf<Student>()
@@ -87,11 +107,14 @@ class DriverDashboardViewModel @Inject constructor(
                 "name" to "Student $i",
                 "stop" to stops.random(),
                 "status" to "Waiting",
-                "busAssigned" to assignedBus
+                "busAssigned" to assignedBus,
+                "fingerprintId" to i
             )
+
             database.child("students").child(studentId).setValue(studentData)
         }
     }
+
     @SuppressLint("MissingPermission")
     fun toggleTracking() {
         _isTracking.value = !_isTracking.value
@@ -102,9 +125,20 @@ class DriverDashboardViewModel @Inject constructor(
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
     }
+    fun simulateBoarding(studentId: String, studentName: String) {
+        markStudentAsBoarded(studentId)
+        tts?.speak(
+            "$studentName has boarded",
+            android.speech.tts.TextToSpeech.QUEUE_FLUSH,
+            null,
+            null
+        )
+    }
 
     override fun onCleared() {
         super.onCleared()
         fusedLocationClient.removeLocationUpdates(locationCallback)
+        tts?.stop()
+        tts?.shutdown()
     }
 }

@@ -52,9 +52,9 @@ class ParentDashboardViewModel(
     // --- Real-time children list ---
     private val _childrenKeys = MutableStateFlow<List<String>>(emptyList())
     val childrenKeys: StateFlow<List<String>> = _childrenKeys
-     // CRITICAL FIX: Define childrenRef as a custom getter that reads the *current value* of the key flow
-     private val parentRef: DatabaseReference
-         get() = database.child("parents").child(_parentKey.value)
+    // CRITICAL FIX: Define childrenRef as a custom getter that reads the *current value* of the key flow
+    private val parentRef: DatabaseReference
+        get() = database.child("parents").child(_parentKey.value)
 
     private val childrenRef: DatabaseReference
         get() = parentRef.child("children")
@@ -184,10 +184,10 @@ class ParentDashboardViewModel(
                                         if (dataSnap.exists()) {
                                             database.child("parents").child(targetKey)
                                                 .setValue(dataSnap.value).addOnSuccessListener {
-                                                _parentKey.value = targetKey
-                                                currentParentRef.removeValue()
-                                                    .addOnCompleteListener { isMigrating = false }
-                                            }
+                                                    _parentKey.value = targetKey
+                                                    currentParentRef.removeValue()
+                                                        .addOnCompleteListener { isMigrating = false }
+                                                }
                                         }
                                     }
                                 }
@@ -657,5 +657,3 @@ class ParentDashboardViewModel(
             "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
     }
 }
-
-

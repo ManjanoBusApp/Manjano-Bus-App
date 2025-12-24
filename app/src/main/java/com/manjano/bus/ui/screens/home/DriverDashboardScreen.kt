@@ -1,22 +1,53 @@
 package com.manjano.bus.ui.screens.home
 
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import android.Manifest
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.BottomSheetScaffold
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberBottomSheetScaffoldState
+import androidx.compose.material3.rememberStandardBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.navigation.NavHostController
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.rememberMultiplePermissionsState
 import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.*
-import com.google.accompanist.permissions.* //
-import androidx.compose.material3.BottomSheetScaffold
-import androidx.compose.material3.rememberBottomSheetScaffoldState
-import androidx.compose.material3.SheetValue
-import androidx.compose.material3.rememberStandardBottomSheetState
-import androidx.compose.material3.HorizontalDivider
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.MapProperties
+import com.google.maps.android.compose.rememberCameraPositionState
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 
 
 @OptIn(ExperimentalPermissionsApi::class)
@@ -25,27 +56,24 @@ fun DriverDashboardScreen(
     navController: NavHostController,
     viewModel: DriverDashboardViewModel
 ) {
-    // 1. Permission State
     val locationPermissionState = rememberMultiplePermissionsState(
         listOf(
-            android.Manifest.permission.ACCESS_FINE_LOCATION,
-            android.Manifest.permission.ACCESS_COARSE_LOCATION
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         )
     )
 
-    // 2. Request permission on entry
     LaunchedEffect(Unit) {
         locationPermissionState.launchMultiplePermissionRequest()
     }
 
     if (locationPermissionState.allPermissionsGranted) {
-        // If granted, show the actual dashboard
         DashboardContent(navController, viewModel)
     } else {
-        // If not granted, show a button to request it
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text("Location Permission is required to track the bus.")
+                Spacer(modifier = Modifier.height(8.dp))
                 Button(onClick = { locationPermissionState.launchMultiplePermissionRequest() }) {
                     Text("Grant Permission")
                 }
@@ -57,12 +85,25 @@ fun DriverDashboardScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardContent(
-    navController: NavHostController,
+    _navController: NavHostController,
     viewModel: DriverDashboardViewModel
 ) {
     val isTracking by viewModel.isTracking.collectAsState()
     val students by viewModel.studentList.collectAsState()
     val beijingRoad = LatLng(-1.3815977, 36.9395961)
+    val context = LocalContext.current
+
+    // Standard approach to get FragmentActivity in Compose
+    val activity = remember(context) {
+        var currentContext = context
+        while (currentContext is android.content.ContextWrapper) {
+            if (currentContext is FragmentActivity) break
+            currentContext = currentContext.baseContext
+        }
+        currentContext as? FragmentActivity
+    }
+
+    val executor = remember(context) { ContextCompat.getMainExecutor(context) }
 
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(beijingRoad, 15f)
@@ -76,22 +117,38 @@ fun DashboardContent(
 
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
-        sheetPeekHeight = 150.dp,
+        sheetPeekHeight = 180.dp,
         sheetContainerColor = Color.White,
         sheetContent = {
-            Column(
+            LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(16.dp)
+                    .heightIn(min = 400.dp, max = 800.dp)
+                    .padding(horizontal = 16.dp)
             ) {
-                Text(
-                    text = "Student Attendance List",
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = Color.Black
-                )
-                HorizontalDivider(modifier = Modifier.padding(vertical = 12.dp))
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Student List",
+                            style = MaterialTheme.typography.headlineMedium,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.Black,
+                            textAlign = TextAlign.Center
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
+                        Text(
+                            text = "scroll up",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                }
 
-                students.forEach { student ->
+                items(students) { student ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -99,7 +156,7 @@ fun DashboardContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = student.name,
                                 style = MaterialTheme.typography.bodyLarge,
@@ -111,33 +168,14 @@ fun DashboardContent(
                                 color = Color.Gray
                             )
                         }
-                        val context = androidx.compose.ui.platform.LocalContext.current
-                        val activity = context as androidx.fragment.app.FragmentActivity
 
                         Button(
                             onClick = {
-                                val executor = androidx.core.content.ContextCompat.getMainExecutor(context)
-                                val biometricPrompt = androidx.biometric.BiometricPrompt(
-                                    activity,
-                                    executor,
-                                    object : androidx.biometric.BiometricPrompt.AuthenticationCallback() {
-                                        override fun onAuthenticationSucceeded(result: androidx.biometric.BiometricPrompt.AuthenticationResult) {
-                                            super.onAuthenticationSucceeded(result)
-                                            viewModel.markStudentAsBoarded(student.id)
-                                        }
-                                    }
-                                )
-
-                                val promptInfo = androidx.biometric.BiometricPrompt.PromptInfo.Builder()
-                                    .setTitle("Student Verification")
-                                    .setSubtitle("Scan finger to confirm boarding")
-                                    .setNegativeButtonText("Cancel")
-                                    .build()
-
-                                biometricPrompt.authenticate(promptInfo)
+                                // Directly board the student using their ID
+                                viewModel.simulateBoarding(student.id, student.name)
                             },
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (student.status == "Boarded") Color.Gray else Color(0xFFE91E63)
+                                containerColor = if (student.status == "Boarded") Color.Gray else Color(0xFF6200EE)
                             ),
                             enabled = student.status != "Boarded"
                         ) {
