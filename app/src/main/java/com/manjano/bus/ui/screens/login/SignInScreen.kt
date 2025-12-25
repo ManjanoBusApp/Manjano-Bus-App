@@ -197,18 +197,13 @@ fun SignInScreen(
                 isSendingOtp = uiState.isSendingOtp,
                 onRememberMeChange = viewModel::onRememberMeChange,
                 onGetCodeClick = {
-                    if (!PhoneNumberUtils.isValidNumber(
-                            uiState.rawPhoneInput,
-                            uiState.selectedCountry.isoCode
-                        )
-                    ) {
+                    val isValid = PhoneNumberUtils.isValidNumber(
+                        uiState.rawPhoneInput,
+                        uiState.selectedCountry.isoCode
+                    )
+
+                    if (!isValid) {
                         showPhoneError = true
-                        scope.launch {
-                            snackbarHostState.showSnackbar(
-                                message = "Please Enter a Valid Phone Number"
-                            )
-                        }
-                        // Keep focus on phone input
                         phoneFocusRequester.requestFocus()
                     } else {
                         showPhoneError = false
@@ -217,7 +212,7 @@ fun SignInScreen(
                         viewModel.requestOtp()
 
                         scope.launch {
-                            delay(300) // allow recomposition
+                            delay(300)
                             otpFocusRequester.requestFocus()
                             scrollState.animateScrollTo(scrollState.maxValue)
                         }
@@ -512,7 +507,7 @@ fun PhoneInputSection(
                 placeholder = {
                     Text(
                         text = "Mobile Number",
-                        fontSize = 14.sp,
+                        fontSize = 16.sp,
                         maxLines = 1,
                         softWrap = false
                     )
