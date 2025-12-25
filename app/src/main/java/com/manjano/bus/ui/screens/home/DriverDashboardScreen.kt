@@ -158,12 +158,12 @@ fun DashboardContent(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = student.name,
+                                text = student.displayName,
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = Color.Black
                             )
                             Text(
-                                text = student.stop,
+                                text = "Parent: ${student.parentName}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
@@ -171,8 +171,7 @@ fun DashboardContent(
 
                         Button(
                             onClick = {
-                                // Directly board the student using their ID
-                                viewModel.simulateBoarding(student.id, student.name)
+                                viewModel.simulateBoarding(student.childId, student.displayName)
                             },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = if (student.status == "Boarded") Color.Gray else Color(0xFF6200EE)
@@ -186,7 +185,9 @@ fun DashboardContent(
             }
         }
     ) { paddingValues ->
-        Box(modifier = Modifier.padding(paddingValues).fillMaxSize()) {
+        Box(modifier = Modifier
+            .padding(paddingValues)
+            .fillMaxSize()) {
             GoogleMap(
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,

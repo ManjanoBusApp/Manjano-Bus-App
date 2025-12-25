@@ -10,11 +10,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
 
 data class Student(
-    val id: String = "",
-    val name: String = "",
-    val stop: String = "",
+    val childId: String = "",
+    val displayName: String = "",
+    val parentName: String = "",
     val status: String = "Waiting",
-    val busAssigned: String = "",
+    val active: Boolean = true,
+    val eta: String = "",
     val fingerprintId: Int? = null
 )
 
@@ -64,14 +65,14 @@ class DriverDashboardViewModel @Inject constructor(
         if (hardwareId == null) return
         val student = _studentList.value.find { it.fingerprintId == hardwareId }
         student?.let {
-            markStudentAsBoarded(it.id)
+            markStudentAsBoarded(it.childId)
             tts?.speak(
-                "${it.name} has boarded",
+                "${it.displayName} has boarded",
                 android.speech.tts.TextToSpeech.QUEUE_FLUSH,
                 null,
                 null
             )
-            android.util.Log.d("HARDWARE_SCAN", "Successfully Boarded: ${it.name}")
+            android.util.Log.d("HARDWARE_SCAN", "Successfully Boarded: ${it.displayName}")
         }
     }
 

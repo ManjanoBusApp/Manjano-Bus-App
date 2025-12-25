@@ -181,111 +181,84 @@ class SignUpViewModel : ViewModel() {
 
         // CRITICAL FIX: Wrap entire asynchronous storage/database operation in try-catch to prevent main thread crash.
         try {
-            // ✅ New: List all image files from the "Children Images" folder in Firebase Storage
-            val storage = com.google.firebase.storage.FirebaseStorage.getInstance()
-                .reference
-                .child("Children Images") // 👈 point to correct folder where images are stored
+            val parentKey = sanitizeKey(parentName)
+            val rootRef = com.google.firebase.database.FirebaseDatabase.getInstance().reference
+            val parentRef = rootRef.child("parents").child(parentKey).child("children")
+            val globalStudentsRef = rootRef.child("students")
+            val childrenList = childrenNames.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+            val newChildKeys = childrenList.map { it.lowercase().replace(Regex("[^a-z0-9]"), "_") }
 
-            val imageBaseNames = mutableMapOf<String, String>()  // normalized name -> full file name
+            parentRef.get().addOnSuccessListener { snapshot ->
+                val finalUpdates = mutableMapOf<String, Any?>()
+                val existingKeys = snapshot.children.mapNotNull { it.key }.toSet()
+                val newKeysSet = newChildKeys.toSet()
 
-            storage.listAll()
-                .addOnSuccessListener { listResult ->
-                    Log.d("🔥", "✅ Listed ${listResult.items.size} files from Storage")
+                (existingKeys - newKeysSet).forEach { removedKey ->
+                    finalUpdates["parents/$parentKey/children/$removedKey"] = null
+                    finalUpdates["students/$removedKey"] = null
+                    Log.d("🔥", "🗑️ Child removed: $removedKey synced to students")
+                }
 
+                val storage =
+                    com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
+                val imageBaseNames = mutableMapOf<String, String>()
+
+                storage.listAll().addOnSuccessListener { listResult ->
                     listResult.items.forEach { item ->
                         val fullName = item.name
                         val baseName = fullName.substringBeforeLast('.')
-                        val normalizedBase = normalizeName(baseName)
-                        imageBaseNames[normalizedBase] = fullName
-                        Log.d("🔥", "📸 Found: $fullName → normalized=$normalizedBase")
+                        imageBaseNames[normalizeName(baseName)] = fullName
                     }
 
-                    val childrenList = childrenNames.split(",").map { it.trim() }
-
                     childrenList.forEach { childName ->
-                        if (childName.isNotEmpty()) {
-                            val childKey = childName.lowercase().replace(Regex("[^a-z0-9]"), "_")
-                            val sanitizedChildName = normalizeName(childName)
+                        val childKey = childName.lowercase().replace(Regex("[^a-z0-9]"), "_")
+                        val sanitizedChildName = normalizeName(childName)
+                        val chosenBase = imageBaseNames.keys.find { key ->
+                            key.contains(sanitizedChildName, ignoreCase = true) ||
+                                    sanitizedChildName.contains(key, ignoreCase = true)
+                        }
 
-                            // Simple Levenshtein fuzzy matching
-                            fun levenshtein(lhs: String, rhs: String): Int {
-                                val dp = Array(lhs.length + 1) { IntArray(rhs.length + 1) }
-                                for (i in 0..lhs.length) dp[i][0] = i
-                                for (j in 0..rhs.length) dp[0][j] = j
-                                for (i in 1..lhs.length) {
-                                    for (j in 1..rhs.length) {
-                                        val cost = if (lhs[i - 1] == rhs[j - 1]) 0 else 1
-                                        dp[i][j] = minOf(
-                                            dp[i - 1][j] + 1,
-                                            dp[i][j - 1] + 1,
-                                            dp[i - 1][j - 1] + cost
-                                        )
-                                    }
-                                }
-                                return dp[lhs.length][rhs.length]
-                            }
+                        val finalFileName =
+                            if (chosenBase != null) storage.child(imageBaseNames[chosenBase]!!)
+                            else storage.root.child("Default Image").child("defaultchild.png")
 
-                            val chosenBase = imageBaseNames.keys.find { key ->
-                                key.contains(sanitizedChildName, ignoreCase = true) ||
-                                        sanitizedChildName.contains(key, ignoreCase = true) ||
-                                        key.toCharArray().sorted().joinToString("") == sanitizedChildName.toCharArray().sorted().joinToString("")
-                            }
+                        finalFileName.downloadUrl.addOnCompleteListener { task ->
+                            val finalPhotoUrl = if (task.isSuccessful) task.result.toString()
+                            else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
 
-                            val finalFileName = if (chosenBase != null) imageBaseNames[chosenBase] else null
+                            val childData = mapOf(
+                                "eta" to "Arriving in 5 minutes",
+                                "active" to true,
+                                "displayName" to childName,
+                                "photoUrl" to finalPhotoUrl,
+                                "status" to "On Route",
+                                "parentName" to parentName,
+                                "childId" to childKey
+                            )
 
-                            val imageRef = if (finalFileName != null) {
-                                // file exists in Children Images folder
-                                storage.child(finalFileName)
-                            } else {
-                                // fallback: explicit reference to Default Image/defaultchild.png
-                                // storage is reference to "Children Images" — use storage.root to access the top-level then child the correct folder
-                                storage.root.child("Default Image").child("defaultchild.png")
-                            }
+                            finalUpdates["parents/$parentKey/children/$childKey"] = childData
+                            finalUpdates["students/$childKey"] = childData
 
-                            val parentKey = sanitizeKey(parentName)
-                            val childRef = com.google.firebase.database.FirebaseDatabase.getInstance()
-                                .getReference("parents")
-                                .child(parentKey)
-                                .child("children")
-                                .child(childKey)
-
-                            val defaultPhotoUrl = "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
-
-                            imageRef.downloadUrl.addOnCompleteListener { task ->
-                                val finalPhotoUrl = if (task.isSuccessful) task.result.toString() else defaultPhotoUrl
-
-                                val childData = mapOf(
-                                    "eta" to "Arriving in 5 minutes",
-                                    "active" to true,
-                                    "displayName" to childName,
-                                    "photoUrl" to finalPhotoUrl,
-                                    "status" to "On Route",
-                                    "messages" to emptyMap<String, Any>()
-                                )
-
-                                childRef.setValue(childData)
-                                    .addOnSuccessListener {
-                                        Log.d("🔥", "✅ Saved '$childKey' for parent '$parentKey'. Image status: ${task.isSuccessful}")
-                                    }
-                                    .addOnFailureListener { e ->
-                                        Log.e("🔥", "❌ Failed to save child node: ${e.message}")
-                                    }
+                            rootRef.updateChildren(finalUpdates).addOnSuccessListener {
+                                Log.d("🔥", "✅ Source of Truth Synced: $childKey")
                             }
                         }
                     }
                 }
+            }
+
                 .addOnFailureListener { e ->
-                    Log.e("🔥", "❌ Failed to list Storage files: ${e.message}", e)
+                    Log.e("🔥", "❌ Failed to list Storage files", e)
                     _uiState.value = _uiState.value.copy(
-                        otpErrorMessage = "Failed to list images: ${e.message}",
+                        otpErrorMessage = "Unable to load child images. Please try again later.",
                         showOtpError = true
                     )
+                    return@addOnFailureListener
                 }
         } catch (e: Exception) {
-            // CRITICAL: Catch immediate exceptions like FirebaseApp not initialized or Storage issues
-            Log.e("🔥", "❌ CRITICAL: Immediate failure during Firebase save setup: ${e.message}", e)
+            Log.e("🔥", "❌ CRITICAL: Immediate failure during Firebase save setup", e)
             _uiState.value = _uiState.value.copy(
-                otpErrorMessage = "CRITICAL: App configuration error during data save. Check Firebase SDK.",
+                otpErrorMessage = "App error occurred while saving data. Check your network and try again.",
                 showOtpError = true
             )
         }

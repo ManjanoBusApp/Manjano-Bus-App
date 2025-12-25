@@ -121,8 +121,29 @@ class ParentDashboardViewModel(
                     "photoUrl" to DEFAULT_CHILD_PHOTO_URL,
                     "status" to "On Route"
                 )
-                // 2. Automatically inject the structure into Firebase
+                // Automatically inject the structure into Firebase
                 childrenRef.child(key).updateChildren(defaultData)
+            }
+
+            // 2. Mirror addition to global /students node if missing
+            database.child("students").child(key).get().addOnSuccessListener { snap ->
+                if (!snap.exists()) {
+                    val displayName =
+                        snapshot.child("displayName").getValue(String::class.java) ?: key
+                    val parentName = _parentDisplayName.value
+                    val studentData = mapOf(
+                        "childId" to key,
+                        "displayName" to displayName,
+                        "parentName" to parentName,
+                        "status" to "On Route",
+                        "active" to true,
+                        "eta" to snapshot.child("eta").getValue(String::class.java).orEmpty(),
+                        "photoUrl" to snapshot.child("photoUrl").getValue(String::class.java)
+                            .orEmpty()
+                    )
+                    database.child("students").child(key).setValue(studentData)
+                        .addOnSuccessListener { Log.d("🔥", "Global student created: $key") }
+                }
             }
 
             // 3. Update the UI list
@@ -146,11 +167,23 @@ class ParentDashboardViewModel(
         }
 
         override fun onChildRemoved(snapshot: DataSnapshot) {
-            val key = snapshot.key ?: return
-            // Filter the existing list to remove the deleted key immediately
-            _childrenKeys.value = _childrenKeys.value.filter { it != key }
-            Log.d("🔥", "Manual or Parent Entry Removed: $key")
+            val childKey = snapshot.key ?: return
+
+            // 1. Remove from parent's UI immediately
+            _childrenKeys.value = _childrenKeys.value.filter { it != childKey }
+            Log.d("🔥", "Child removed from parent: $childKey")
+
+            // 2. 🔥 CRITICAL: Mirror deletion to global students node
+            database.child("students").child(childKey)
+                .removeValue()
+                .addOnSuccessListener {
+                    Log.d("🔥", "Global student removed: $childKey")
+                }
+                .addOnFailureListener { e ->
+                    Log.e("🔥", "Failed to remove student $childKey: ${e.message}")
+                }
         }
+
 
         override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) { /* ignore */
         }
