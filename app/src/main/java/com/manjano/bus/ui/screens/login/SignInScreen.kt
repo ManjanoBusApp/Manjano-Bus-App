@@ -89,6 +89,9 @@ import kotlinx.coroutines.launch
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import androidx.compose.ui.focus.onFocusChanged
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -179,6 +182,7 @@ fun SignInScreen(
                     showPhoneError = false
                 },
                 showError = showPhoneError,
+                onShowErrorChange = { showPhoneError = it },
                 phoneFocusRequester = phoneFocusRequester,
                 keyboardController = keyboardController,
                 focusManager = focusManager
@@ -333,6 +337,7 @@ fun PhoneInputSection(
     onCountrySelected: (Country) -> Unit,
     onPhoneNumberChange: (String) -> Unit,
     showError: Boolean,
+    onShowErrorChange: (Boolean) -> Unit,
     phoneFocusRequester: FocusRequester,
     keyboardController: SoftwareKeyboardController?,
     focusManager: androidx.compose.ui.focus.FocusManager
@@ -363,12 +368,14 @@ fun PhoneInputSection(
         }
     }
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
+    Row(verticalAlignment = Alignment.Top) {
         Box(
             modifier = Modifier
+                .padding(top = 0.dp) // Keeps it flush with the top of the phone input
                 .width(96.dp)
                 .height(48.dp)
         ) {
+
             OutlinedTextField(
                 value = "${selectedCountry.flag} ${selectedCountry.dialCode}",
                 onValueChange = {},
@@ -535,7 +542,21 @@ fun PhoneInputSection(
                 isError = displayError,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .focusRequester(phoneFocusRequester),
+                    .focusRequester(phoneFocusRequester)
+                    .onFocusChanged { state: androidx.compose.ui.focus.FocusState ->
+                        if (!state.isFocused && localPhone.text.isNotEmpty()) {
+                            val isValid = try {
+                                val proto =
+                                    phoneUtil.parse(localPhone.text, selectedCountry.isoCode)
+                                phoneUtil.isValidNumberForRegion(proto, selectedCountry.isoCode)
+                            } catch (e: Exception) {
+                                false
+                            }
+                            if (!isValid) {
+                                onShowErrorChange(true)
+                            }
+                        }
+                    },
                 textStyle = TextStyle(fontSize = 15.sp),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -547,10 +568,11 @@ fun PhoneInputSection(
 
             if (displayError) {
                 Text(
-                    text = "Please Enter a Valid Phone Number",
+                    text = "Invalid phone number",
                     color = Color.Red,
                     fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 4.dp)
+                    maxLines = 1,
+                    modifier = Modifier.padding(top = 2.dp)
                 )
             }
         }

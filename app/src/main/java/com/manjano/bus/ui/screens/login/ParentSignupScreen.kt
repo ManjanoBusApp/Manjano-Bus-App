@@ -430,42 +430,35 @@ fun SignupScreen(
         val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
         // 2. Pass them into the function below
-        PhoneInputSection(
-            selectedCountry = selectedCountry,
-            phoneNumber = phoneNumber,
-            onCountrySelected = { selectedCountry = it },
-            onPhoneNumberChange = {
-                phoneNumber = it
-                // Disable real-time error reporting while typing
-                phoneError = false
+        Box(modifier = Modifier.fillMaxWidth()) {
+            PhoneInputSection(
+                selectedCountry = selectedCountry,
+                phoneNumber = phoneNumber,
+                onCountrySelected = { selectedCountry = it },
+                onPhoneNumberChange = {
+                    phoneNumber = it
+                    // Disable real-time error reporting while typing
+                    phoneError = false
 
-                val isValidPhone = try {
-                    PhoneNumberUtils.isValidNumber(it, selectedCountry.isoCode)
-                } catch (e: Exception) {
-                    false
-                }
+                    val isValidPhone = try {
+                        PhoneNumberUtils.isValidNumber(it, selectedCountry.isoCode)
+                    } catch (e: Exception) {
+                        false
+                    }
 
-                // Keyboard will ONLY hide when the logic confirms the number is fully correct
-                if (isValidPhone) {
-                    keyboardController?.hide()
-                    focusManager.clearFocus()
-                }
-            },
-            showError = phoneError,
-            phoneFocusRequester = phoneFocusRequester,
-            keyboardController = keyboardController,
-            focusManager = focusManager
-        )
-
-        if (phoneError) {
-            Text(
-                "Please enter a valid phone number",
-                color = Color.Red,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+                    // Keyboard will ONLY hide when the logic confirms the number is fully correct
+                    if (isValidPhone) {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                    }
+                },
+                showError = phoneError,
+                onShowErrorChange = { phoneError = it },
+                phoneFocusRequester = phoneFocusRequester,
+                keyboardController = keyboardController,
+                focusManager = focusManager
             )
         }
-
         Spacer(modifier = Modifier.height(16.dp))
 
         SnackbarHost(
