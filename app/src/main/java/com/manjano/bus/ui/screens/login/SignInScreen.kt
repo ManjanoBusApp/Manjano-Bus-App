@@ -1,20 +1,56 @@
 package com.manjano.bus.ui.screens.login
 
+import android.content.Context
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CheckboxDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -46,15 +82,13 @@ import com.manjano.bus.models.CountryRepository
 import com.manjano.bus.utils.Constants
 import com.manjano.bus.utils.PhoneNumberUtils
 import com.manjano.bus.viewmodel.SignInViewModel
+import com.manjano.bus.viewmodel.SignUpViewModel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import java.util.Locale
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import com.manjano.bus.viewmodel.SignUpViewModel
-import android.content.Context
-import android.content.SharedPreferences
+import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,8 +122,10 @@ fun SignInScreen(
                 val parentName = prefs.getString("parent_name", "") ?: ""
                 val childrenNames = prefs.getString("children_names", "") ?: ""
                 val parentFirstName = parentName.split(" ").firstOrNull() ?: parentName
-                val encodedParent = URLEncoder.encode(parentFirstName, StandardCharsets.UTF_8.toString())
-                val encodedChildren = URLEncoder.encode(childrenNames, StandardCharsets.UTF_8.toString())
+                val encodedParent =
+                    URLEncoder.encode(parentFirstName, StandardCharsets.UTF_8.toString())
+                val encodedChildren =
+                    URLEncoder.encode(childrenNames, StandardCharsets.UTF_8.toString())
                 val encodedStatus = URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
                 navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
                     popUpTo("signin/parent") { inclusive = true }
@@ -143,7 +179,9 @@ fun SignInScreen(
                     showPhoneError = false
                 },
                 showError = showPhoneError,
-                phoneFocusRequester = phoneFocusRequester
+                phoneFocusRequester = phoneFocusRequester,
+                keyboardController = keyboardController,
+                focusManager = focusManager
             )
 
             val snackbarHostState = remember { SnackbarHostState() }
@@ -155,7 +193,11 @@ fun SignInScreen(
                 isSendingOtp = uiState.isSendingOtp,
                 onRememberMeChange = viewModel::onRememberMeChange,
                 onGetCodeClick = {
-                    if (!PhoneNumberUtils.isValidNumber(uiState.rawPhoneInput, uiState.selectedCountry.isoCode)) {
+                    if (!PhoneNumberUtils.isValidNumber(
+                            uiState.rawPhoneInput,
+                            uiState.selectedCountry.isoCode
+                        )
+                    ) {
                         showPhoneError = true
                         scope.launch {
                             snackbarHostState.showSnackbar(
@@ -209,19 +251,11 @@ fun SignInScreen(
                 },
                 keyboardController = keyboardController,
                 onClearError = { showValidationError = false },
-                onAutoVerify = { scope.launch { viewModel.verifyOtp() } },
+                onAutoVerify = { },
                 isSending = uiState.isOtpSubmitting,
                 focusRequester = otpFocusRequester
             )
 
-// Debounce logic for OTP verification
-            LaunchedEffect(uiState.otpDigits.joinToString("")) {
-                val joinedOtp = uiState.otpDigits.joinToString("")
-                if (joinedOtp.length == Constants.OTP_LENGTH) {
-                    delay(300) // debounce time
-                    viewModel.verifyOtp()
-                }
-            }
 
             AnimatedVisibility(visible = uiState.showOtpError) {
                 Text(
@@ -242,22 +276,37 @@ fun SignInScreen(
 
             Button(
                 onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+
                     keyboardController?.hide()
                     focusManager.clearFocus()
                     showValidationError = false
-
                     val enteredOtp = uiState.otpDigits.joinToString("")
                     viewModel.updateOtpDigits(enteredOtp)
                     viewModel.verifyOtp()
+
+                    scope.launch {
+                        repeat(2) {
+                            continueShakeOffset.floatValue = 4f
+                            delay(40)
+                            continueShakeOffset.floatValue = -4f
+                            delay(40)
+                        }
+                        continueShakeOffset.floatValue = 0f
+                    }
                 },
                 enabled = uiState.otpDigits.all { it.isNotEmpty() } && !uiState.isOtpSubmitting,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF800080)),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF800080),
+                    disabledContainerColor = Color(0xFF800080).copy(alpha = 0.6f)
+                ),
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp)
+                    .offset(x = continueShakeOffset.floatValue.dp)
             ) {
                 Text(
-                    text = if (uiState.isOtpSubmitting) "Sending..." else "Continue",
+                    text = "Continue",
                     color = Color.White,
                     fontSize = 16.sp
                 )
@@ -284,8 +333,11 @@ fun PhoneInputSection(
     onCountrySelected: (Country) -> Unit,
     onPhoneNumberChange: (String) -> Unit,
     showError: Boolean,
-    phoneFocusRequester: FocusRequester
+    phoneFocusRequester: FocusRequester,
+    keyboardController: SoftwareKeyboardController?,
+    focusManager: androidx.compose.ui.focus.FocusManager
 ) {
+
     var expanded by remember { mutableStateOf(false) }
     val appPurple = Color(0xFF800080)
     var localPhone by remember { mutableStateOf(TextFieldValue(phoneNumber)) }
@@ -313,7 +365,9 @@ fun PhoneInputSection(
 
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
-            modifier = Modifier.width(96.dp).height(48.dp)
+            modifier = Modifier
+                .width(96.dp)
+                .height(48.dp)
         ) {
             OutlinedTextField(
                 value = "${selectedCountry.flag} ${selectedCountry.dialCode}",
@@ -357,14 +411,18 @@ fun PhoneInputSection(
                     expanded = false
                     searchQuery = ""
                 },
-                modifier = Modifier.heightIn(max = 400.dp).width(280.dp),
+                modifier = Modifier
+                    .heightIn(max = 400.dp)
+                    .width(280.dp),
                 properties = PopupProperties(focusable = true)
             ) {
                 OutlinedTextField(
                     value = searchQuery,
                     onValueChange = { searchQuery = it },
                     placeholder = { Text("Search country") },
-                    modifier = Modifier.fillMaxWidth().padding(8.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(8.dp),
                     singleLine = true,
                     textStyle = TextStyle(fontSize = 14.sp),
                     shape = RoundedCornerShape(8.dp)
@@ -410,7 +468,11 @@ fun PhoneInputSection(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        Column(modifier = Modifier.fillMaxWidth().height(48.dp)) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp)
+        ) {
             OutlinedTextField(
                 value = localPhone,
                 onValueChange = { newValue ->
@@ -427,15 +489,50 @@ fun PhoneInputSection(
                     )
 
                     onPhoneNumberChange(limitedDigits)
+
+                    // Auto-hide keyboard when valid length/format is reached for the specific country
+                    val isNumberValid = try {
+                        val proto = phoneUtil.parse(limitedDigits, selectedCountry.isoCode)
+                        phoneUtil.isValidNumberForRegion(proto, selectedCountry.isoCode)
+                    } catch (e: Exception) {
+                        false
+                    }
+
+                    if (isNumberValid) {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                    }
                 },
                 placeholder = { Text("Enter Mobile Number") },
+                trailingIcon = {
+                    val isNumberValid = try {
+                        val phoneUtil = PhoneNumberUtil.getInstance()
+                        val proto = phoneUtil.parse(phoneNumber, selectedCountry.isoCode)
+                        phoneUtil.isValidNumberForRegion(proto, selectedCountry.isoCode)
+                    } catch (e: Exception) {
+                        false
+                    }
+
+                    if (isNumberValid) {
+                        // Using a simple Text label if Icons are giving you trouble
+                        Text(
+                            text = "✓ ",
+                            color = Color(0xFF4CAF50),
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(end = 8.dp)
+                        )
+                    }
+                },
+
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Done
                 ),
                 singleLine = true,
                 isError = displayError,
-                modifier = Modifier.fillMaxSize().focusRequester(phoneFocusRequester),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .focusRequester(phoneFocusRequester),
                 textStyle = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -535,7 +632,9 @@ fun ResendTimerSection(
 ) {
     val appPurple = Color(0xFF800080)
     Row(
-        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.End
     ) {
@@ -651,7 +750,9 @@ fun OtpInputRow(
 @Composable
 fun SignUpFooter(onSignUpClick: () -> Unit) {
     Row(
-        modifier = Modifier.fillMaxWidth().padding(top = 16.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 16.dp),
         horizontalArrangement = Arrangement.Center
     ) {
         Text("Don't have an account? ")

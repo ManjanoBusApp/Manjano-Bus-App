@@ -48,7 +48,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-
+import androidx.compose.foundation.background
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -67,15 +67,33 @@ fun DriverDashboardScreen(
         locationPermissionState.launchMultiplePermissionRequest()
     }
 
-    if (locationPermissionState.allPermissionsGranted) {
-        DashboardContent(navController, viewModel)
-    } else {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Location Permission is required to track the bus.")
-                Spacer(modifier = Modifier.height(8.dp))
-                Button(onClick = { locationPermissionState.launchMultiplePermissionRequest() }) {
-                    Text("Grant Permission")
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+    ) {
+        if (locationPermissionState.allPermissionsGranted) {
+            DashboardContent(navController, viewModel)
+        } else if (locationPermissionState.shouldShowRationale) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = "Location access is required to track the bus and use the dashboard.",
+                    color = Color.White,
+                    textAlign = TextAlign.Center,
+                    style = MaterialTheme.typography.bodyLarge
+                )
+                Spacer(modifier = Modifier.height(16.dp))
+                Button(
+                    onClick = { locationPermissionState.launchMultiplePermissionRequest() },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF800080))
+                ) {
+                    Text("Enable Permissions", color = Color.White)
                 }
             }
         }

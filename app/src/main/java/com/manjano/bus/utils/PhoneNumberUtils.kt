@@ -59,18 +59,15 @@ object PhoneNumberUtils {
 
     fun isValidNumber(rawDigits: String?, regionCode: String): Boolean {
         if (rawDigits.isNullOrEmpty()) return false
-
         val digits = rawDigits.filter { it.isDigit() }
         if (digits.isEmpty()) return false
 
-        // Kenya-specific validation rules
-        if (regionCode == "KE") {
-            // Kenya numbers must be exactly 10 digits and start with 07 or 01
-            return digits.length == 10 && (digits.startsWith("07") || digits.startsWith("01"))
-        }
-
         return try {
             val protoNumber = phoneUtil.parse(digits, regionCode)
+
+            // This single line handles the WHOLE world correctly.
+            // It checks both the correct length and the current prefixes
+            // for the specific country (KE, UG, US, etc.)
             phoneUtil.isValidNumber(protoNumber)
         } catch (e: Exception) {
             false
@@ -95,25 +92,17 @@ object PhoneNumberUtils {
             val exampleNumber = phoneUtil.getExampleNumber(regionCode)
             phoneUtil.format(exampleNumber, PhoneNumberUtil.PhoneNumberFormat.NATIONAL)
         } catch (e: Exception) {
-            when (regionCode) {
-                "KE" -> "+254 712 345 678"
-                "UG" -> "+256 712 345 678"
-                "TZ" -> "+255 712 345 678"
-                "RW" -> "+250 712 345 678"
-                "ET" -> "+251 912 345 678"
-                else -> "+123 456 7890"
-            }
+            // Universal fallback: just show a generic pattern
+            "712 345 678"
         }
     }
 
     private fun getCountryName(region: String): String {
-        return when (region) {
-            "KE" -> "Kenya"
-            "UG" -> "Uganda"
-            "TZ" -> "Tanzania"
-            "RW" -> "Rwanda"
-            "ET" -> "Ethiopia"
-            else -> region
+        // Use Java's Locale to get the country name automatically for any region code
+        return try {
+            Locale("", region).getDisplayCountry(Locale.ENGLISH)
+        } catch (e: Exception) {
+            region
         }
     }
 
@@ -133,17 +122,15 @@ object PhoneNumberUtils {
     }
 
     /**
-     * Returns the expected number of digits for each supported country.
-     * Used to hide the keyboard once the full number has been typed.
+     * Returns the expected number of digits for ANY country dynamically.
+     * This ensures 01xxx works in Kenya and any length works globally.
      */
     fun getExpectedLength(regionCode: String): Int {
-        return when (regionCode.uppercase(Locale.ROOT)) {
-            "KE" -> 10 // Kenya
-            "UG" -> 9  // Uganda
-            "TZ" -> 9  // Tanzania
-            "RW" -> 9  // Rwanda
-            "ET" -> 9  // Ethiopia
-            else -> 10 // fallback
+        return try {
+            val example = phoneUtil.getExampleNumber(regionCode)
+            example.nationalNumber.toString().length
+        } catch (e: Exception) {
+            10 // Standard fallback
         }
     }
 }

@@ -54,7 +54,6 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -425,6 +424,12 @@ fun SignupScreen(
         val phoneFocusRequester = remember { FocusRequester() }
 
         // Phone input
+        // 1. Ensure these are defined at the TOP of your Screen Composable
+        val keyboardController =
+            androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+        // 2. Pass them into the function below
         PhoneInputSection(
             selectedCountry = selectedCountry,
             phoneNumber = phoneNumber,
@@ -440,13 +445,14 @@ fun SignupScreen(
                 phoneError = it.isNotEmpty() && it.length == requiredLength && !isValidPhone
                 if (it.length == requiredLength) {
                     keyboardController?.hide()
-                    phoneFocusRequester.requestFocus()
+                    focusManager.clearFocus()
                 }
             },
             showError = phoneError,
-            phoneFocusRequester = phoneFocusRequester // ← Fix
+            phoneFocusRequester = phoneFocusRequester,
+            keyboardController = keyboardController,
+            focusManager = focusManager
         )
-
         if (phoneError) {
             Text(
                 "Please enter a valid phone number",

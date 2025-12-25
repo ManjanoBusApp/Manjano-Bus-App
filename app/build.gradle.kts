@@ -79,7 +79,7 @@ dependencies {
     implementation(libs.firebase.crashlytics)
     implementation("com.google.firebase:firebase-database-ktx")
     implementation("androidx.datastore:datastore-preferences:1.1.0")
-    implementation("com.googlecode.libphonenumber:libphonenumber:8.13.13")
+    implementation("com.googlecode.libphonenumber:libphonenumber:9.0.21")
     implementation("androidx.compose.material:material-icons-extended:1.5.0")
     debugImplementation(libs.ui.tooling)
     debugImplementation(libs.ui.test.manifest)

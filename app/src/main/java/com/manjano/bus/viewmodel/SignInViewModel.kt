@@ -4,13 +4,13 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.manjano.bus.models.Country
 import com.manjano.bus.models.CountryRepository
+import com.manjano.bus.utils.Constants
 import com.manjano.bus.utils.PhoneNumberUtils
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
-import com.manjano.bus.utils.Constants
 
 
 // ---------------- SignInUiState ----------------
@@ -195,12 +195,6 @@ class SignInViewModel : ViewModel() {
 
         if (isComplete) {
             onHideKeyboard()
-
-            autoSubmitJob?.cancel()
-            autoSubmitJob = viewModelScope.launch {
-                delay(500)
-                verifyOtp()
-            }
         }
     }
 
@@ -218,13 +212,6 @@ class SignInViewModel : ViewModel() {
             shouldShakeOtp = false
         )
 
-        if (digits.length == Constants.OTP_LENGTH) {
-            autoSubmitJob?.cancel()
-            autoSubmitJob = viewModelScope.launch {
-                delay(500)
-                verifyOtp()
-            }
-        }
     }
 
     // --- Verify OTP (compares against Constants.TEST_OTP or sentOtp) ---
@@ -238,8 +225,6 @@ class SignInViewModel : ViewModel() {
                 shouldShakeOtp = false,
                 showOtpError = false
             )
-
-            delay(1000) // simulate network call
 
             if (enteredOtp == Constants.TEST_OTP || enteredOtp == _uiState.value.sentOtp) {
                 _uiState.value = _uiState.value.copy(

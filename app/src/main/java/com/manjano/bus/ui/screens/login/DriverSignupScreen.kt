@@ -256,6 +256,12 @@ fun DriverSignupScreen(
         val phoneFocusRequester = remember { FocusRequester() }
 
         // Phone input
+        // 1. Ensure these are defined at the TOP of your Screen Composable
+        val keyboardController =
+            androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+
+        // 2. Pass them into the function below
         PhoneInputSection(
             selectedCountry = selectedCountry,
             phoneNumber = phoneNumber,
@@ -271,11 +277,13 @@ fun DriverSignupScreen(
                 phoneError = it.isNotEmpty() && it.length == requiredLength && !isValidPhone
                 if (it.length == requiredLength) {
                     keyboardController?.hide()
-                    phoneFocusRequester.requestFocus()
+                    focusManager.clearFocus()
                 }
             },
             showError = phoneError,
-            phoneFocusRequester = phoneFocusRequester // ← Fix
+            phoneFocusRequester = phoneFocusRequester,
+            keyboardController = keyboardController,
+            focusManager = focusManager
         )
 
         if (phoneError) {
