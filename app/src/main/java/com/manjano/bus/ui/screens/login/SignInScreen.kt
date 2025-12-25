@@ -469,10 +469,9 @@ fun PhoneInputSection(
         Spacer(modifier = Modifier.width(8.dp))
 
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(48.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
+
             OutlinedTextField(
                 value = localPhone,
                 onValueChange = { newValue ->
@@ -503,27 +502,31 @@ fun PhoneInputSection(
                         focusManager.clearFocus()
                     }
                 },
-                placeholder = { Text("Enter Mobile Number") },
+                placeholder = {
+                    Text(
+                        text = "Mobile Number",
+                        fontSize = 14.sp,
+                        maxLines = 1,
+                        softWrap = false
+                    )
+                },
                 trailingIcon = {
                     val isNumberValid = try {
-                        val phoneUtil = PhoneNumberUtil.getInstance()
-                        val proto = phoneUtil.parse(phoneNumber, selectedCountry.isoCode)
+                        val proto = phoneUtil.parse(localPhone.text, selectedCountry.isoCode)
                         phoneUtil.isValidNumberForRegion(proto, selectedCountry.isoCode)
                     } catch (e: Exception) {
                         false
                     }
 
                     if (isNumberValid) {
-                        // Using a simple Text label if Icons are giving you trouble
                         Text(
-                            text = "✓ ",
+                            text = "✓",
                             color = Color(0xFF4CAF50),
                             fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(end = 8.dp)
+                            modifier = Modifier.padding(end = 4.dp)
                         )
                     }
                 },
-
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Number,
                     imeAction = ImeAction.Done
@@ -531,9 +534,9 @@ fun PhoneInputSection(
                 singleLine = true,
                 isError = displayError,
                 modifier = Modifier
-                    .fillMaxSize()
+                    .fillMaxWidth()
                     .focusRequester(phoneFocusRequester),
-                textStyle = TextStyle(fontSize = 16.sp, lineHeight = 24.sp),
+                textStyle = TextStyle(fontSize = 15.sp),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = if (displayError) Color.Red else appPurple,

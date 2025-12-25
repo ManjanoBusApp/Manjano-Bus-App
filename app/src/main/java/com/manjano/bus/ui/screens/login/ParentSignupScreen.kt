@@ -436,14 +436,17 @@ fun SignupScreen(
             onCountrySelected = { selectedCountry = it },
             onPhoneNumberChange = {
                 phoneNumber = it
+                // Disable real-time error reporting while typing
+                phoneError = false
+
                 val isValidPhone = try {
                     PhoneNumberUtils.isValidNumber(it, selectedCountry.isoCode)
                 } catch (e: Exception) {
                     false
                 }
-                val requiredLength = PhoneNumberUtils.getExpectedLength(selectedCountry.isoCode)
-                phoneError = it.isNotEmpty() && it.length == requiredLength && !isValidPhone
-                if (it.length == requiredLength) {
+
+                // Keyboard will ONLY hide when the logic confirms the number is fully correct
+                if (isValidPhone) {
                     keyboardController?.hide()
                     focusManager.clearFocus()
                 }
@@ -453,6 +456,7 @@ fun SignupScreen(
             keyboardController = keyboardController,
             focusManager = focusManager
         )
+
         if (phoneError) {
             Text(
                 "Please enter a valid phone number",
@@ -589,9 +593,20 @@ fun SignupScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         val isOtpValid by signupViewModel.isOtpValid.collectAsState()
+        val continueShakeOffset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
 
         Button(
             onClick = {
+                scope.launch {
+                    repeat(2) {
+                        continueShakeOffset.floatValue = 4f
+                        delay(40)
+                        continueShakeOffset.floatValue = -4f
+                        delay(40)
+                    }
+                    continueShakeOffset.floatValue = 0f
+                }
+
                 parentError = parentName.text.isEmpty()
                 val hasEmptyChild = childrenNames.any { it.text.isEmpty() }
                 childErrors = childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
@@ -603,26 +618,20 @@ fun SignupScreen(
                 val isTestOtp = enteredOtp == Constants.TEST_OTP
 
                 if (!parentError && !studentError && !emailError && !phoneError && isTestOtp) {
-                    // CRITICAL FIX: The logic must now call saveUserNames() to create the
-                    // parent-specific Firebase nodes before navigation.
-
                     Log.d("🔥", "TEST OTP used – initiating saveUserNames for Firebase setup.")
 
-                    // 1. Initiate Firebase Save (asynchronously creates /parents/{key}/children)
                     signupViewModel.saveUserNames(
                         parentName.text,
                         childrenNames.joinToString(",") { it.text },
                         context
                     )
 
-                    // 2. Save locally for session persistence
                     val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
                     prefs.edit().apply {
                         putString("parent_name", parentName.text)
                         putString("children_names", childrenNames.joinToString(",") { it.text })
                     }.apply()
 
-                    // 3. Navigate to dashboard (relying on asynchronous save starting immediately)
                     val encodedParent = URLEncoder.encode(parentName.text, StandardCharsets.UTF_8.toString())
                     val encodedChildren = URLEncoder.encode(
                         childrenNames.joinToString(",") { it.text },
@@ -633,11 +642,8 @@ fun SignupScreen(
                         popUpTo("signup") { inclusive = true }
                     }
                 }
-                // If it's a real OTP (when you go live) and not the test one, this block would handle it.
-                // We leave the block here but ensure the TEST OTP block is self-contained.
                 else if (!parentError && !studentError && !emailError && !phoneError && !isTestOtp && enteredOtp.isNotEmpty()) {
-                    // This block is typically for real production OTP validation flow.
-                    // For now, it remains empty or follows a real OTP verification path.
+                    // Logic for real production OTP validation flow
                 }
             },
             enabled = parentName.text.isNotEmpty() &&
@@ -646,8 +652,13 @@ fun SignupScreen(
                     Patterns.EMAIL_ADDRESS.matcher(email.text).matches() &&
                     phoneNumber.isNotEmpty() &&
                     uiState.otpDigits.joinToString("") == Constants.TEST_OTP,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = appPurple)
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(x = continueShakeOffset.floatValue.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = appPurple,
+                disabledContainerColor = appPurple.copy(alpha = 0.5f)
+            )
         ) {
             Text("Continue", color = Color.White, fontSize = 16.sp)
         }

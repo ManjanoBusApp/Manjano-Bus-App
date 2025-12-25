@@ -286,14 +286,17 @@ fun AdminSignupScreen(
             onCountrySelected = { selectedCountry = it },
             onPhoneNumberChange = {
                 phoneNumber = it
+                // Disable real-time error reporting while typing
+                phoneError = false
+
                 val isValidPhone = try {
                     PhoneNumberUtils.isValidNumber(it, selectedCountry.isoCode)
                 } catch (e: Exception) {
                     false
                 }
-                val requiredLength = PhoneNumberUtils.getExpectedLength(selectedCountry.isoCode)
-                phoneError = it.isNotEmpty() && it.length == requiredLength && !isValidPhone
-                if (it.length == requiredLength) {
+
+                // Keyboard will ONLY hide when the logic confirms the number is fully correct
+                if (isValidPhone) {
                     keyboardController?.hide()
                     focusManager.clearFocus()
                 }
@@ -421,9 +424,20 @@ fun AdminSignupScreen(
         Spacer(modifier = Modifier.height(12.dp))
 
         val isOtpValid by signupViewModel.isOtpValid.collectAsState()
+        val continueShakeOffset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
 
         Button(
             onClick = {
+                scope.launch {
+                    repeat(2) {
+                        continueShakeOffset.floatValue = 4f
+                        delay(40)
+                        continueShakeOffset.floatValue = -4f
+                        delay(40)
+                    }
+                    continueShakeOffset.floatValue = 0f
+                }
+
                 adminError = adminName.text.isEmpty()
                 idError = idNumber.text.isEmpty()
                 schoolError = schoolName.text.isEmpty()
@@ -445,8 +459,13 @@ fun AdminSignupScreen(
                     currentPosition.text.isNotEmpty() &&
                     phoneNumber.isNotEmpty() &&
                     uiState.otpDigits.joinToString("") == Constants.TEST_OTP,
-            modifier = Modifier.fillMaxWidth(),
-            colors = ButtonDefaults.buttonColors(containerColor = appPurple)
+            modifier = Modifier
+                .fillMaxWidth()
+                .offset(x = continueShakeOffset.floatValue.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = appPurple,
+                disabledContainerColor = appPurple.copy(alpha = 0.5f)
+            )
         ) {
             Text("Continue", color = Color.White, fontSize = 16.sp)
         }
