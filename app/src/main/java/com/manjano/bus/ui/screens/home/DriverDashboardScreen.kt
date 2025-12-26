@@ -149,19 +149,19 @@ fun DashboardContent(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
+                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
+                        Text(
+                            text = "scroll up",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Red,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
                         Text(
                             text = "Student List",
                             style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.Black,
                             textAlign = TextAlign.Center
-                        )
-                        HorizontalDivider(modifier = Modifier.padding(top = 12.dp, bottom = 4.dp))
-                        Text(
-                            text = "scroll up",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.Gray,
-                            modifier = Modifier.padding(bottom = 8.dp)
                         )
                     }
                 }
