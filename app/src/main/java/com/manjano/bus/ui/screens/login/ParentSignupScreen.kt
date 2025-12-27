@@ -75,6 +75,12 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import com.manjano.bus.models.Country
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
+
+
+
 
 @Composable
 fun SignupOtpInputRow(
@@ -111,38 +117,46 @@ fun SignupOtpInputRow(
                 .offset(x = offsetX)
         ) {
             safeOtp.forEachIndexed { index, digit ->
-                OutlinedTextField(
-                    value = digit,
-                    onValueChange = { newValue ->
-                        if (newValue.length <= 1 && newValue.all { ch -> ch.isDigit() }) {
-                            val newOtp = safeOtp.toMutableList()
-                            newOtp[index] = newValue
-                            onOtpChange(newOtp)
+                Box(
+                    modifier = Modifier.onFocusChanged { focusState ->
+                        if (!focusState.isFocused && digit.isEmpty()) {
+                            onClearError()
+                        }
+                    }
+                ) {
+                    OutlinedTextField(
+                        value = digit,
+                        onValueChange = { newValue ->
+                            if (newValue.length <= 1 && newValue.all { ch -> ch.isDigit() }) {
+                                val newOtp = safeOtp.toMutableList()
+                                newOtp[index] = newValue
+                                onOtpChange(newOtp)
 
-                            if (newValue.isNotEmpty() && index < Constants.OTP_LENGTH - 1) {
-                                focusManager.moveFocus(FocusDirection.Next)
-                            }
+                                if (newValue.isNotEmpty() && index < Constants.OTP_LENGTH - 1) {
+                                    focusManager.moveFocus(FocusDirection.Next)
+                                }
 
-                            if (newValue.isNotEmpty() && index == Constants.OTP_LENGTH - 1) {
-                                // Small delay to ensure the digit is processed before hiding keyboard
-                                scope.launch {
-                                    delay(50) // Brief delay
-                                    keyboardController?.hide()
+                                if (newValue.isNotEmpty() && index == Constants.OTP_LENGTH - 1) {
+                                    scope.launch {
+                                        delay(50)
+                                        keyboardController?.hide()
+                                    }
                                 }
                             }
-                        }
-                    },
+                        },
 
-                    singleLine = true,
-                    textStyle = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
-                    modifier = Modifier
-                        .size(50.dp)
-                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
-                    keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Number,
-                        imeAction = if (index == Constants.OTP_LENGTH - 1) ImeAction.Done else ImeAction.Next
+                        singleLine = true,
+                        textStyle = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
+                        modifier = Modifier
+                            .size(50.dp)
+                            .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Number,
+                            imeAction = if (index == Constants.OTP_LENGTH - 1) ImeAction.Done else ImeAction.Next
+                        ),
+                        isError = otpErrorMessage != null
                     )
-                )
+                }
             }
         }
     }
@@ -179,7 +193,9 @@ fun SignupScreen(
     var parentError by remember { mutableStateOf(false) }
     var studentError by remember { mutableStateOf(false) }
     var emailError by remember { mutableStateOf(false) }
+    var hasTouchedEmail by remember { mutableStateOf(false) }
     var phoneError by remember { mutableStateOf(false) }
+    var hasTouchedPhone by remember { mutableStateOf(false) }
     var selectedCountry by remember { mutableStateOf(CountryRepository.countries.first()) }
     var phoneNumber by remember { mutableStateOf("") }
     var showOtpMessage by remember { mutableStateOf(false) }
@@ -192,6 +208,11 @@ fun SignupScreen(
     val studentFocusRequester = remember { FocusRequester() }
     val emailFocusRequester = remember { FocusRequester() }
     val context = androidx.compose.ui.platform.LocalContext.current
+
+    LaunchedEffect(Unit) {
+        parentFocusRequester.requestFocus()
+    }
+
 
     Column(
         modifier = Modifier
@@ -250,6 +271,7 @@ fun SignupScreen(
                 .focusRequester(parentFocusRequester)
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) parentError = false
+                    else parentError = parentName.text.isBlank()
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
@@ -264,22 +286,29 @@ fun SignupScreen(
 // ==================== DYNAMIC MULTI-CHILD SECTION (FINAL COMPACT VERSION) ====================
         var childrenNames by remember { mutableStateOf(listOf(TextFieldValue(""))) }
         var childErrors by remember { mutableStateOf(listOf(false)) }
+        var hasTouchedChild by remember { mutableStateOf(listOf(false)) }
+
 
 // Add new child
         val addChild = {
             val newChildren = childrenNames.toMutableList().apply { add(TextFieldValue("")) }
             val newErrors = childErrors.toMutableList().apply { add(false) }
+            val newTouched = hasTouchedChild.toMutableList().apply { add(false) }
             childrenNames = newChildren
             childErrors = newErrors
+            hasTouchedChild = newTouched
         }
+
 
 // Remove child
         val removeChild = { index: Int ->
             if (childrenNames.size > 1) {
                 childrenNames = childrenNames.filterIndexed { i, _ -> i != index }
                 childErrors = childErrors.filterIndexed { i, _ -> i != index }
+                hasTouchedChild = hasTouchedChild.filterIndexed { i, _ -> i != index }
             }
         }
+
 
 // Column for all child fields
         Column {
@@ -291,9 +320,13 @@ fun SignupScreen(
                         onValueChange = { newValue ->
                             val filtered = newValue.text.filter { it.isLetter() || it.isWhitespace() }
                             val updatedChildren = childrenNames.toMutableList()
+                            val updatedTouched = hasTouchedChild.toMutableList()
                             updatedChildren[index] = newValue.copy(text = filtered)
+                            updatedTouched[index] = true
                             childrenNames = updatedChildren
+                            hasTouchedChild = updatedTouched
                         },
+
                         placeholder = { Text("Child 'First.Middle.Last' Name") },
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Text,
@@ -305,11 +338,18 @@ fun SignupScreen(
                             .focusRequester(childFocusRequester)
                             .onFocusChanged { focusState ->
                                 if (focusState.isFocused) {
+                                    val updatedTouched = hasTouchedChild.toMutableList()
+                                    updatedTouched[index] = true
+                                    hasTouchedChild = updatedTouched
+                                }
+
+                                if (!focusState.isFocused && hasTouchedChild[index]) {
                                     val updatedErrors = childErrors.toMutableList()
-                                    updatedErrors[index] = false
+                                    updatedErrors[index] = childrenNames[index].text.isBlank()
                                     childErrors = updatedErrors
                                 }
                             },
+
                         textStyle = TextStyle(fontSize = 16.sp),
                         shape = RoundedCornerShape(12.dp),
                         isError = childErrors[index]
@@ -326,6 +366,7 @@ fun SignupScreen(
                                 .padding(top = 2.dp)
                         )
                     }
+
 
                     // "+ Add" button below, aligned to end
                     if (index == childrenNames.lastIndex) {
@@ -386,9 +427,11 @@ fun SignupScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Email
+        // Email
         OutlinedTextField(
             value = email,
             onValueChange = {
+                hasTouchedEmail = true
                 email = it
             },
             placeholder = { Text("name@email.com") },
@@ -399,15 +442,19 @@ fun SignupScreen(
                 .focusRequester(emailFocusRequester)
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) {
-                        emailError = false
+                        hasTouchedEmail = true
+                    }
+                    if (!focusState.isFocused && hasTouchedEmail) {
+                        emailError =
+                            email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
+                                .matches()
                     }
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
             isError = emailError
         )
-
-        if (emailError) Text(
+        if (emailError && hasTouchedEmail) Text(
             "Please enter a valid email address",
             color = Color.Red,
             fontSize = 12.sp
@@ -415,43 +462,40 @@ fun SignupScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        val dummyFocusRequester = remember { FocusRequester() }
-        Box(
-            modifier = Modifier
-                .size(0.dp)
-                .focusRequester(dummyFocusRequester)
-        )
+
         val phoneFocusRequester = remember { FocusRequester() }
 
-        // Phone input
-        // 1. Ensure these are defined at the TOP of your Screen Composable
-        val keyboardController =
-            androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+// Phone input
+        val keyboardController = LocalSoftwareKeyboardController.current
+        val focusManager = LocalFocusManager.current
 
-        // 2. Pass them into the function below
-        Box(modifier = Modifier.fillMaxWidth()) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focusState ->
+                    if (focusState.isFocused) {
+                        hasTouchedPhone = true
+                    } else if (hasTouchedPhone) {
+                        val isValidPhone = try {
+                            PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                        } catch (e: Exception) {
+                            false
+                        }
+                        phoneError = phoneNumber.isBlank() || !isValidPhone
+                    }
+                }
+        ) {
+
             PhoneInputSection(
                 selectedCountry = selectedCountry,
                 phoneNumber = phoneNumber,
                 onCountrySelected = { selectedCountry = it },
-                onPhoneNumberChange = {
-                    phoneNumber = it
-                    // Disable real-time error reporting while typing
+                onPhoneNumberChange = { newNumber ->
+                    hasTouchedPhone = true
+                    phoneNumber = newNumber
                     phoneError = false
-
-                    val isValidPhone = try {
-                        PhoneNumberUtils.isValidNumber(it, selectedCountry.isoCode)
-                    } catch (e: Exception) {
-                        false
-                    }
-
-                    // Keyboard will ONLY hide when the logic confirms the number is fully correct
-                    if (isValidPhone) {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                    }
                 },
+
                 showError = phoneError,
                 onShowErrorChange = { phoneError = it },
                 phoneFocusRequester = phoneFocusRequester,
@@ -459,6 +503,17 @@ fun SignupScreen(
                 focusManager = focusManager
             )
         }
+
+
+        LaunchedEffect(Unit) {
+            // Only request focus for phone when parent and child fields are valid and OTP is not yet requested
+            if (parentName.text.isNotEmpty() && childrenNames.all { it.text.isNotEmpty() }) {
+                // Optional: uncomment if you want initial phone focus after parent/child
+                // phoneFocusRequester.requestFocus()
+            }
+        }
+
+
         Spacer(modifier = Modifier.height(16.dp))
 
         SnackbarHost(
@@ -481,7 +536,7 @@ fun SignupScreen(
                 // Validate all fields ONCE when Send Code is clicked
                 parentError = parentName.text.isEmpty()
 
-                // Validate ALL children names - FORCE UPDATE childErrors!
+                hasTouchedChild = List(childrenNames.size) { true }
                 childErrors =
                     childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
                 val hasEmptyChild = childErrors.any { it }
@@ -550,15 +605,21 @@ fun SignupScreen(
             )
         }
 
+        val otpBoxErrors: SnapshotStateList<Boolean> = remember {
+            mutableStateListOf(*Array(Constants.OTP_LENGTH) { false })
+        }
+
         SignupOtpInputRow(
             otp = uiState.otpDigits,
-            otpErrorMessage = uiState.otpErrorMessage,
+            otpErrorMessage = if (otpBoxErrors.any { error -> error }) "Please fill all OTP digits" else null,
             shouldShakeOtp = uiState.shouldShakeOtp,
             onOtpChange = { digits: List<String> ->
                 showOtpMessage = false
                 digits.forEachIndexed { index, digit ->
                     signupViewModel.onOtpDigitChange(index, digit)
+                    otpBoxErrors[index] = digit.isEmpty()
                 }
+                showOtpErrorMessage = otpBoxErrors.any { it }
                 if (digits.all { it.isNotEmpty() }) {
                     val enteredOtp = digits.joinToString("")
                     if (enteredOtp == Constants.TEST_OTP) {
@@ -566,27 +627,33 @@ fun SignupScreen(
                         signupViewModel.setOtpValid(true)
                     } else {
                         signupViewModel.setOtpValid(false)
-                        showOtpErrorMessage = true // → New: Show invalid OTP message
+                        showOtpErrorMessage = true
                     }
-                } else {
-                    showOtpErrorMessage =
-                        false // → New: Hide invalid OTP message if not all digits entered
                 }
             },
-
-
             keyboardController = keyboardController,
-            focusManager = focusManager, // NEW ARGUMENT
-            onClearError = {},
+            focusManager = focusManager,
+            onClearError = {
+                otpBoxErrors.fill(false)
+                showOtpErrorMessage = false
+            },
             onAutoVerify = {},
             isSending = uiState.isOtpSubmitting,
             focusRequester = otpFocusRequester
         )
 
+
         Spacer(modifier = Modifier.height(12.dp))
 
         val isOtpValid by signupViewModel.isOtpValid.collectAsState()
         val continueShakeOffset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+
+        val isFormValid = parentName.text.isNotEmpty() &&
+                childrenNames.all { it.text.isNotEmpty() } &&
+                email.text.isNotEmpty() &&
+                Patterns.EMAIL_ADDRESS.matcher(email.text).matches() &&
+                phoneNumber.isNotEmpty() &&
+                uiState.otpDigits.joinToString("") == Constants.TEST_OTP
 
         Button(
             onClick = {
@@ -601,10 +668,15 @@ fun SignupScreen(
                 }
 
                 parentError = parentName.text.isEmpty()
+                hasTouchedChild = List(childrenNames.size) { true }
                 val hasEmptyChild = childrenNames.any { it.text.isEmpty() }
                 childErrors = childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
                 studentError = hasEmptyChild
-                emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text).matches()
+                hasTouchedEmail = true
+                emailError =
+                    email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
+                        .matches()
+
                 phoneError = phoneNumber.isEmpty()
 
                 val enteredOtp = uiState.otpDigits.joinToString("")
@@ -639,18 +711,13 @@ fun SignupScreen(
                     // Logic for real production OTP validation flow
                 }
             },
-            enabled = parentName.text.isNotEmpty() &&
-                    childrenNames.all { it.text.isNotEmpty() } &&
-                    email.text.isNotEmpty() &&
-                    Patterns.EMAIL_ADDRESS.matcher(email.text).matches() &&
-                    phoneNumber.isNotEmpty() &&
-                    uiState.otpDigits.joinToString("") == Constants.TEST_OTP,
+            enabled = isFormValid,
             modifier = Modifier
                 .fillMaxWidth()
                 .offset(x = continueShakeOffset.floatValue.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = appPurple,
-                disabledContainerColor = appPurple.copy(alpha = 0.5f)
+                containerColor = if (isFormValid) appPurple else Color.LightGray,
+                disabledContainerColor = Color.LightGray
             )
         ) {
             Text("Continue", color = Color.White, fontSize = 16.sp)
@@ -680,10 +747,10 @@ fun SignupScreen(
                     navController.navigate("signin/parent")
                 }
             )
+
         }
     }
 }
-
 
 
 

@@ -213,6 +213,7 @@ fun SignInScreen(
 
                         scope.launch {
                             delay(300)
+                            focusManager.clearFocus(force = true)
                             otpFocusRequester.requestFocus()
                             scrollState.animateScrollTo(scrollState.maxValue)
                         }
@@ -273,6 +274,17 @@ fun SignInScreen(
             val continueShakeOffset = remember { mutableFloatStateOf(0f) }
             val haptic = LocalHapticFeedback.current
 
+            val isPhoneValid = try {
+                val proto = PhoneNumberUtil.getInstance()
+                    .parse(uiState.rawPhoneInput, uiState.selectedCountry.isoCode)
+                PhoneNumberUtil.getInstance()
+                    .isValidNumberForRegion(proto, uiState.selectedCountry.isoCode)
+            } catch (e: Exception) {
+                false
+            }
+
+            val isOtpComplete = uiState.otpDigits.all { it.isNotEmpty() }
+
             Button(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -294,10 +306,10 @@ fun SignInScreen(
                         continueShakeOffset.floatValue = 0f
                     }
                 },
-                enabled = uiState.otpDigits.all { it.isNotEmpty() } && !uiState.isOtpSubmitting,
+                enabled = isPhoneValid && isOtpComplete && !uiState.isOtpSubmitting,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = Color(0xFF800080),
-                    disabledContainerColor = Color(0xFF800080).copy(alpha = 0.6f)
+                    containerColor = if (isPhoneValid && isOtpComplete) Color(0xFF800080) else Color.LightGray,
+                    disabledContainerColor = Color.LightGray
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -310,6 +322,7 @@ fun SignInScreen(
                     fontSize = 16.sp
                 )
             }
+
 
             SignUpFooter(onSignUpClick = {
                 when (role) {
@@ -368,7 +381,7 @@ fun PhoneInputSection(
             modifier = Modifier
                 .padding(top = 0.dp) // Keeps it flush with the top of the phone input
                 .width(96.dp)
-                .height(48.dp)
+                .height(56.dp)
         ) {
 
             OutlinedTextField(
@@ -501,13 +514,13 @@ fun PhoneInputSection(
 
                     if (isNumberValid) {
                         keyboardController?.hide()
-                        focusManager.clearFocus()
                     }
+
                 },
                 placeholder = {
                     Text(
                         text = "Mobile Number",
-                        fontSize = 16.sp,
+                        fontSize = 17.sp,
                         maxLines = 1,
                         softWrap = false
                     )
@@ -552,7 +565,7 @@ fun PhoneInputSection(
                             }
                         }
                     },
-                textStyle = TextStyle(fontSize = 15.sp),
+                textStyle = TextStyle(fontSize = 20.sp),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = if (displayError) Color.Red else appPurple,
@@ -629,8 +642,8 @@ fun ActionRow(
                     shakeOffset.floatValue = 0f
                 }
                 onGetCodeClick()
-                phoneFocusRequester?.requestFocus() // request focus if provided
             },
+
             enabled = !isSendingOtp,
             colors = ButtonDefaults.buttonColors(containerColor = Color.Black),
             modifier = Modifier.offset(x = shakeOffset.floatValue.dp)
@@ -743,7 +756,6 @@ fun OtpInputRow(
                                 focusRequesters[index + 1].requestFocus()
                             }
 
-                            // Hide keyboard after last digit
                             if (newValue.isNotEmpty() && index == Constants.OTP_LENGTH - 1) {
                                 keyboardController?.hide()
                             }
@@ -753,7 +765,6 @@ fun OtpInputRow(
                     textStyle = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
                     modifier = Modifier
                         .size(50.dp)
-                        // ✅ Use passed focusRequester for the first box
                         .focusRequester(if (index == 0) focusRequester else focusRequesters[index]),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
