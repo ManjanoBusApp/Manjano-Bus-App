@@ -522,7 +522,9 @@ fun PhoneInputSection(
                         text = "Mobile Number",
                         fontSize = 17.sp,
                         maxLines = 1,
-                        softWrap = false
+                        softWrap = false,
+                        modifier = Modifier.offset(x = (-4).dp),
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Visible
                     )
                 },
                 trailingIcon = {
@@ -534,12 +536,16 @@ fun PhoneInputSection(
                     }
 
                     if (isNumberValid) {
-                        Text(
-                            text = "✓",
-                            color = Color(0xFF4CAF50),
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(end = 4.dp)
-                        )
+                        Box(
+                            modifier = Modifier.offset(x = 8.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "✓",
+                                color = Color(0xFF4CAF50),
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                 },
                 keyboardOptions = KeyboardOptions(
