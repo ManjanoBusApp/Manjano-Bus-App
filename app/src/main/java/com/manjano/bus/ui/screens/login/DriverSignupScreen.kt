@@ -87,6 +87,11 @@ fun DriverSignupScreen(
     var driverError by remember { mutableStateOf(false) }
     var idError by remember { mutableStateOf(false) }
     var schoolError by remember { mutableStateOf(false) }
+
+    // New trackers to prevent immediate errors
+    var driverTouched by remember { mutableStateOf(false) }
+    var idTouched by remember { mutableStateOf(false) }
+    var schoolTouched by remember { mutableStateOf(false) }
     var phoneError by remember { mutableStateOf(false) }
     var selectedCountry by remember { mutableStateOf(CountryRepository.countries.first()) }
     var phoneNumber by remember { mutableStateOf("") }
@@ -150,12 +155,13 @@ fun DriverSignupScreen(
                         end = newValue.selection.end.coerceIn(0, filtered.length)
                     )
                 )
+                if (filtered.isNotEmpty()) driverError = false
             },
-
             placeholder = { Text("Your Full Name") },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
-                capitalization = KeyboardCapitalization.Words
+                capitalization = KeyboardCapitalization.Words,
+                imeAction = ImeAction.Next
             ),
             singleLine = true,
             modifier = Modifier
@@ -163,13 +169,22 @@ fun DriverSignupScreen(
                 .focusRequester(driverFocusRequester)
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) {
+                        driverTouched = true
                         driverError = false
+                    } else if (!focusState.isFocused && driverTouched && driverName.text.isEmpty()) {
+                        driverError = true
                     }
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
-            isError = driverError
+            isError = driverError,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = if (driverError) Color.Red else appPurple,
+                unfocusedBorderColor = if (driverError) Color.Red else Color.Gray,
+                cursorColor = if (driverError) Color.Red else appPurple
+            )
         )
+
         if (driverError) Text("Please fill your name", color = Color.Red, fontSize = 12.sp)
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -186,11 +201,12 @@ fun DriverSignupScreen(
                         end = newValue.selection.end.coerceIn(0, filtered.length)
                     )
                 )
+                if (filtered.isNotEmpty()) idError = false
             },
-
             placeholder = { Text("ID Number") },
             keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Number
+                keyboardType = KeyboardType.Number,
+                imeAction = ImeAction.Next
             ),
             singleLine = true,
             modifier = Modifier
@@ -198,12 +214,20 @@ fun DriverSignupScreen(
                 .focusRequester(idFocusRequester)
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) {
+                        idTouched = true
                         idError = false
+                    } else if (!focusState.isFocused && idTouched && idNumber.text.isEmpty()) {
+                        idError = true
                     }
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
-            isError = idError
+            isError = idError,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = if (idError) Color.Red else appPurple,
+                unfocusedBorderColor = if (idError) Color.Red else Color.Gray,
+                cursorColor = if (idError) Color.Red else appPurple
+            )
         )
 
         if (idError) Text("Please Enter Your ID Number", color = Color.Red, fontSize = 12.sp)
@@ -222,12 +246,13 @@ fun DriverSignupScreen(
                         end = newValue.selection.end.coerceIn(0, filtered.length)
                     )
                 )
+                if (filtered.isNotEmpty()) schoolError = false
             },
-
             placeholder = { Text("School Name") },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
-                capitalization = KeyboardCapitalization.Words
+                capitalization = KeyboardCapitalization.Words,
+                imeAction = ImeAction.Done
             ),
             singleLine = true,
             modifier = Modifier
@@ -235,24 +260,26 @@ fun DriverSignupScreen(
                 .focusRequester(schoolFocusRequester)
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) {
+                        schoolTouched = true
                         schoolError = false
+                    } else if (!focusState.isFocused && schoolTouched && schoolName.text.isEmpty()) {
+                        schoolError = true
                     }
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
-            isError = schoolError
+            isError = schoolError,
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = if (schoolError) Color.Red else appPurple,
+                unfocusedBorderColor = if (schoolError) Color.Red else Color.Gray,
+                cursorColor = if (schoolError) Color.Red else appPurple
+            )
         )
 
         if (schoolError) Text("Please Enter the School Name", color = Color.Red, fontSize = 12.sp)
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        val dummyFocusRequester = remember { FocusRequester() }
-        Box(
-            modifier = Modifier
-                .size(0.dp)
-                .focusRequester(dummyFocusRequester)
-        )
         val phoneFocusRequester = remember { FocusRequester() }
 
         // Phone input
@@ -262,26 +289,47 @@ fun DriverSignupScreen(
         val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
 
         // 2. Pass them into the function below
-        Box(modifier = Modifier.fillMaxWidth()) {
+        var phoneTouched by remember { mutableStateOf(false) }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .onFocusChanged { focusState ->
+                    if (focusState.hasFocus) {
+                        phoneTouched = true
+                        phoneError = false
+                    } else if (!focusState.hasFocus && phoneTouched) {
+                        // Focus has left the entire phone section
+                        val isValidPhone = try {
+                            PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                        } catch (e: Exception) {
+                            false
+                        }
+                        if (phoneNumber.isEmpty() || !isValidPhone) {
+                            phoneError = true
+                        }
+                    }
+                }
+        ) {
             PhoneInputSection(
                 selectedCountry = selectedCountry,
                 phoneNumber = phoneNumber,
                 onCountrySelected = { selectedCountry = it },
                 onPhoneNumberChange = {
                     phoneNumber = it
-                    // Disable real-time error reporting while typing
                     phoneError = false
-
                     val isValidPhone = try {
                         PhoneNumberUtils.isValidNumber(it, selectedCountry.isoCode)
                     } catch (e: Exception) {
                         false
                     }
-
-                    // Keyboard will ONLY hide when the logic confirms the number is fully correct
                     if (isValidPhone) {
+                        // Hide keyboard and automatically move focus to OTP
                         keyboardController?.hide()
-                        focusManager.clearFocus()
+                        showOtpMessage = true // Show the "Please enter code" text
+                        scope.launch {
+                            delay(100) // Brief delay to ensure UI handles the transition
+                            otpFocusRequester.requestFocus()
+                        }
                     }
                 },
                 showError = phoneError,
@@ -379,15 +427,26 @@ fun DriverSignupScreen(
                     if (enteredOtp == Constants.TEST_OTP) {
                         keyboardController?.hide()
                         signupViewModel.setOtpValid(true)
+                        showOtpErrorMessage = false
                     } else {
                         signupViewModel.setOtpValid(false)
-                        showOtpErrorMessage = true // → New: Show invalid OTP message
+                        showOtpErrorMessage = true
+                        // Clear the OTP boxes after a short delay so the user sees the error
+                        scope.launch {
+                            delay(1000)
+                            repeat(Constants.OTP_LENGTH) { index ->
+                                signupViewModel.onOtpDigitChange(index, "")
+                            }
+                            // Reset focus only if we are still on this screen
+                            focusManager.clearFocus()
+                            delay(50)
+                            otpFocusRequester.requestFocus()
+                        }
                     }
                 } else {
-                    showOtpErrorMessage = false // → New: Hide invalid OTP message if not all digits entered
+                    showOtpErrorMessage = false
                 }
             },
-
 
             keyboardController = keyboardController,
             focusManager = focusManager, // NEW ARGUMENT
@@ -417,7 +476,13 @@ fun DriverSignupScreen(
                 driverError = driverName.text.isEmpty()
                 idError = idNumber.text.isEmpty()
                 schoolError = schoolName.text.isEmpty()
-                phoneError = phoneNumber.isEmpty()
+
+                val isValidPhone = try {
+                    PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                } catch (e: Exception) {
+                    false
+                }
+                phoneError = phoneNumber.isEmpty() || !isValidPhone
 
                 if (!driverError && !idError && !schoolError && !phoneError && uiState.otpDigits.joinToString(
                         ""
@@ -438,11 +503,14 @@ fun DriverSignupScreen(
                 .offset(x = continueShakeOffset.floatValue.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = appPurple,
-                disabledContainerColor = appPurple.copy(alpha = 0.5f)
+                disabledContainerColor = Color.LightGray,
+                contentColor = Color.White,
+                disabledContentColor = Color.White
             )
         ) {
-            Text("Continue", color = Color.White, fontSize = 16.sp)
+            Text("Continue", fontSize = 16.sp)
         }
+
         Spacer(modifier = Modifier.height(12.dp))
 
 
@@ -518,15 +586,14 @@ fun DriverSignupOtpInputRow(
                             }
 
                             if (newValue.isNotEmpty() && index == Constants.OTP_LENGTH - 1) {
-                                // Small delay to ensure the digit is processed before hiding keyboard
                                 scope.launch {
-                                    delay(50) // Brief delay
+                                    delay(50)
                                     keyboardController?.hide()
+                                    // Removed focusManager.clearFocus() to prevent jumping to Driver Name
                                 }
                             }
                         }
                     },
-
                     singleLine = true,
                     textStyle = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
                     modifier = Modifier
@@ -535,6 +602,11 @@ fun DriverSignupOtpInputRow(
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
                         imeAction = if (index == Constants.OTP_LENGTH - 1) ImeAction.Done else ImeAction.Next
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        cursorColor = Color(0xFF800080),
+                        focusedBorderColor = Color(0xFF800080),
+                        unfocusedBorderColor = Color.Gray
                     )
                 )
             }

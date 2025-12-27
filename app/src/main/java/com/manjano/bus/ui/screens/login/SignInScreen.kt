@@ -523,7 +523,6 @@ fun PhoneInputSection(
                         fontSize = 17.sp,
                         maxLines = 1,
                         softWrap = false,
-                        modifier = Modifier.offset(x = (-4).dp),
                         overflow = androidx.compose.ui.text.style.TextOverflow.Visible
                     )
                 },
@@ -556,6 +555,7 @@ fun PhoneInputSection(
                 isError = displayError,
                 modifier = Modifier
                     .fillMaxWidth()
+                    .offset(x = (-4).dp)
                     .focusRequester(phoneFocusRequester)
                     .onFocusChanged { state: androidx.compose.ui.focus.FocusState ->
                         if (!state.isFocused && localPhone.text.isNotEmpty()) {
@@ -571,7 +571,7 @@ fun PhoneInputSection(
                             }
                         }
                     },
-                textStyle = TextStyle(fontSize = 20.sp),
+                textStyle = TextStyle(fontSize = 18.sp),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = if (displayError) Color.Red else appPurple,
