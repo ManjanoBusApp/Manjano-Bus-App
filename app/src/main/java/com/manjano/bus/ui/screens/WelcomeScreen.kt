@@ -170,10 +170,18 @@ fun RoleButton(
         colors = ButtonDefaults.buttonColors(containerColor = backgroundColor),
         border = borderColor?.let { BorderStroke(1.dp, it) },
         shape = RoundedCornerShape(8.dp),
+        contentPadding = PaddingValues(horizontal = 4.dp), // Reduce padding to save space
         modifier = modifier
             .height(50.dp)
             .scale(scale)
     ) {
-        Text(text = text, color = textColor)
+        Text(
+            text = text,
+            color = textColor,
+            fontSize = 13.sp, // Slightly smaller to fit small screens
+            maxLines = 1,
+            softWrap = false,
+            textAlign = TextAlign.Center
+        )
     }
 }
