@@ -187,8 +187,10 @@ fun ParentDashboardScreen(
 
             scope.launch {
                 viewModel.getPhotoUrlFlow(key).collect { url ->
-                    val finalUrl = if (url.isBlank() || url == "null" || url.contains("defaultchild.png")) {
-                        defaultPhotoUrl
+                    val defaultUrl =
+                        "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
+                    val finalUrl = if (url.isNullOrBlank() || url == "null") {
+                        defaultUrl
                     } else {
                         url
                     }
@@ -198,7 +200,13 @@ fun ParentDashboardScreen(
                         selectedChild.value = selectedChild.value.copy(photoUrl = finalUrl)
                     }
 
-                    if (finalUrl == defaultPhotoUrl) {
+                    // If Firebase is currently empty, push the default URL to the global 'students' node
+                    // This ensures the Driver Dashboard sees the default image immediately.
+                    if (url.isNullOrBlank() || url == "null") {
+                        database.child("students").child(key).child("photoUrl").setValue(defaultUrl)
+                    }
+
+                    if (finalUrl == defaultUrl) {
                         viewModel.monitorStorageForChildImage(key)
                     }
                 }
@@ -564,15 +572,19 @@ fun ParentDashboardScreen(
                         .padding(top = uiSizes.verticalSpacing)
                         .align(Alignment.CenterHorizontally)
                 ) {
+                    val defaultImageUrl =
+                        "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
+                    val displayUrl =
+                        if (currentPhotoUrl.isNullOrBlank() || currentPhotoUrl == "null") defaultImageUrl else currentPhotoUrl
+
                     Image(
                         painter = rememberAsyncImagePainter(
                             model = ImageRequest.Builder(LocalContext.current)
-                                .data(currentPhotoUrl)
-                                .diskCachePolicy(coil.request.CachePolicy.ENABLED)
-                                .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+                                .data(displayUrl)
+                                .crossfade(true)
                                 .build(),
-                            placeholder = painterResource(R.drawable.defaultchild),
-                            error = painterResource(R.drawable.defaultchild)
+                            placeholder = painterResource(id = R.drawable.defaultchild),
+                            error = painterResource(id = R.drawable.defaultchild)
                         ),
                         contentDescription = "Child photo for ${selectedChild.value.name}",
                         modifier = Modifier
@@ -581,7 +593,6 @@ fun ParentDashboardScreen(
                         contentScale = ContentScale.Crop
                     )
                 }
-
                 Text(
                     text = etaText,
                     fontSize = if (uiSizes.isTablet) 18.sp else 16.sp,

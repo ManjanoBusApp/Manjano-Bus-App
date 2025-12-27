@@ -16,9 +16,9 @@ data class Student(
     val status: String = "Waiting",
     val active: Boolean = true,
     val eta: String = "",
+    val photoUrl: String = "",
     val fingerprintId: Int? = null
 )
-
 @HiltViewModel
 class DriverDashboardViewModel @Inject constructor(
     private val fusedLocationClient: FusedLocationProviderClient,
@@ -85,13 +85,15 @@ class DriverDashboardViewModel @Inject constructor(
         database.child("students")
             .addValueEventListener(object : com.google.firebase.database.ValueEventListener {
                 override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
-                    val list = mutableListOf<Student>()
-                    snapshot.children.forEach { child ->
-                        child.getValue(Student::class.java)?.let { list.add(it) }
+                    val list = snapshot.children.mapNotNull { child ->
+                        child.getValue(Student::class.java)
                     }
                     _studentList.value = list
                 }
-                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {}
+
+                override fun onCancelled(error: com.google.firebase.database.DatabaseError) {
+                    android.util.Log.e("Firebase", "Error fetching students: ${error.message}")
+                }
             })
     }
 

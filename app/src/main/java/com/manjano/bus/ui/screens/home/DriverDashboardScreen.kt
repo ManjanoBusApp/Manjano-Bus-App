@@ -49,6 +49,16 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import com.manjano.bus.R
+import coil.compose.rememberAsyncImagePainter
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+
+
+
+
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -141,8 +151,8 @@ fun DashboardContent(
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .heightIn(min = 400.dp, max = 800.dp)
                     .padding(horizontal = 16.dp)
+                    .padding(bottom = 32.dp)
             ) {
                 item {
                     Column(
@@ -174,29 +184,51 @@ fun DashboardContent(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Box(
+                            modifier = Modifier
+                                .size(50.dp)
+                                .clip(CircleShape)
+                                .background(Color.LightGray)
+                        ) {
+                            val storageDefaultUrl =
+                                "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
+
+                            val imagePainter = coil.compose.rememberAsyncImagePainter(
+                                model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                    .data(if (student.photoUrl.isNullOrBlank() || student.photoUrl == "null") storageDefaultUrl else student.photoUrl)
+                                    .crossfade(true)
+                                    .build()
+                            )
+
+                            androidx.compose.foundation.Image(
+                                painter = imagePainter,
+                                contentDescription = "Student Photo",
+                                modifier = Modifier.fillMaxSize(),
+                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                            )
+
+                            if (imagePainter.state is coil.compose.AsyncImagePainter.State.Loading || imagePainter.state is coil.compose.AsyncImagePainter.State.Error) {
+                                androidx.compose.foundation.Image(
+                                    painter = androidx.compose.ui.res.painterResource(com.manjano.bus.R.drawable.defaultchild),
+                                    contentDescription = null,
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = student.displayName,
                                 style = MaterialTheme.typography.bodyLarge,
-                                color = Color.Black
+                                color = Color.Black,
+                                fontWeight = FontWeight.Bold
                             )
                             Text(
                                 text = "Parent: ${student.parentName}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
-                        }
-
-                        Button(
-                            onClick = {
-                                viewModel.simulateBoarding(student.childId, student.displayName)
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (student.status == "Boarded") Color.Gray else Color(0xFF6200EE)
-                            ),
-                            enabled = student.status != "Boarded"
-                        ) {
-                            Text(if (student.status == "Boarded") "Boarded" else "Scan")
                         }
                     }
                 }
