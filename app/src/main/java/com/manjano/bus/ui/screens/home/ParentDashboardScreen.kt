@@ -265,7 +265,7 @@ fun ParentDashboardScreen(
     val screenWidthDp = configuration.screenWidthDp.dp
     val uiSizes = object {
         val isTablet = screenWidthDp > 600.dp
-        val dropdownWidth = if (isTablet) 200.dp else 160.dp
+        val dropdownWidth = if (isTablet) 260.dp else 220.dp
         val photoSize = if (isTablet) 120.dp else 80.dp
         val mapHeight = if (isTablet) 300.dp else 200.dp
         val verticalSpacing = if (isTablet) 12.dp else 8.dp
@@ -472,7 +472,7 @@ fun ParentDashboardScreen(
                 Box(
                     modifier = Modifier
                         .width(uiSizes.dropdownWidth)
-                        .height(if (uiSizes.isTablet) 56.dp else 48.dp)
+                        .height(if (uiSizes.isTablet) 60.dp else 52.dp)
                         .semantics { contentDescription = "Select child" }
                 ) {
                     OutlinedTextField(
