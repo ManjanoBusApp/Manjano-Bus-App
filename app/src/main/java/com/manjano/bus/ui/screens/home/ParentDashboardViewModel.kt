@@ -111,45 +111,54 @@ class ParentDashboardViewModel(
         override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
 
-            // 1. Check if the node is empty or missing structure
-            if (!snapshot.hasChild("displayName")) {
-                val rawName = key.replace("_", " ").split(" ").joinToString(" ") { it.replaceFirstChar { char -> char.uppercase() } }
-                val defaultData = mapOf(
-                    "active" to true,
-                    "displayName" to rawName,
-                    "eta" to "Arriving in 5 minutes",
-                    "photoUrl" to DEFAULT_CHILD_PHOTO_URL,
-                    "status" to "On Route"
-                )
-                // Automatically inject the structure into Firebase
-                childrenRef.child(key).updateChildren(defaultData)
-            }
+            // 1. Build complete child data with defaults
+            val displayNameRaw = snapshot.child("displayName").getValue(String::class.java)
+            val displayName = if (!displayNameRaw.isNullOrBlank()) displayNameRaw
+            else key.replace("_", " ").split(" ")
+                .joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
 
-            // 2. Mirror addition to global /students node if missing
-            database.child("students").child(key).get().addOnSuccessListener { snap ->
-                if (!snap.exists()) {
-                    val displayName =
-                        snapshot.child("displayName").getValue(String::class.java) ?: key
-                    val parentName = _parentDisplayName.value
-                    val studentData = mapOf(
-                        "childId" to key,
-                        "displayName" to displayName,
-                        "parentName" to parentName,
-                        "status" to "On Route",
-                        "active" to true,
-                        "eta" to snapshot.child("eta").getValue(String::class.java).orEmpty(),
-                        "photoUrl" to snapshot.child("photoUrl").getValue(String::class.java)
-                            .orEmpty()
+            val eta =
+                snapshot.child("eta").getValue(String::class.java).takeIf { !it.isNullOrBlank() }
+                    ?: "Arriving in 5 minutes"
+            val status =
+                snapshot.child("status").getValue(String::class.java).takeIf { !it.isNullOrBlank() }
+                    ?: "On Route"
+            val active = snapshot.child("active").getValue(Boolean::class.java) ?: true
+            val photoUrl = snapshot.child("photoUrl").getValue(String::class.java)
+                .takeIf { !it.isNullOrBlank() } ?: DEFAULT_CHILD_PHOTO_URL
+
+            val fullChildData = mapOf(
+                "childId" to key,
+                "displayName" to displayName,
+                "parentName" to (_parentDisplayName.value.ifBlank { "Unknown Parent" }),
+                "eta" to eta,
+                "status" to status,
+                "active" to active,
+                "photoUrl" to photoUrl
+            )
+
+            // 2. Write missing fields back to /parents/{parent}/children/{key}
+            childrenRef.child(key).updateChildren(fullChildData)
+
+            // 3. Mirror to global /students node
+            database.child("students").child(key).setValue(fullChildData)
+                .addOnSuccessListener {
+                    Log.d(
+                        "🔥",
+                        "Global student created with full structure: $key"
                     )
-                    database.child("students").child(key).setValue(studentData)
-                        .addOnSuccessListener { Log.d("🔥", "Global student created: $key") }
                 }
-            }
+                .addOnFailureListener {
+                    Log.e(
+                        "🔥",
+                        "Failed to create global student $key: ${it.message}"
+                    )
+                }
 
-            // 3. Update the UI list
+            // 4. Update UI list
             if (!_childrenKeys.value.contains(key)) {
                 _childrenKeys.value = _childrenKeys.value + key
-                Log.d("🔥", "Detected and Auto-Formatted manual entry: $key")
+                Log.d("🔥", "Detected and Auto-Formatted child: $key")
             }
         }
 
