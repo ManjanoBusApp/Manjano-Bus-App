@@ -166,13 +166,23 @@ fun ParentDashboardScreen(
     var storageFiles by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(childrenKeys) {
-        // 1. CLEANUP: If a key is no longer in Firebase (childrenKeys), remove it from our UI maps
+        // 1. CLEANUP: Sync deletions with the global students node and local maps
         val currentKeysSet = childrenKeys.toSet()
         val keysToPurge = childrenDisplayMap.keys.filter { it !in currentKeysSet }
 
-        keysToPurge.forEach { key ->
-            childrenDisplayMap.remove(key)
-            childrenPhotoMap.remove(key)
+        if (keysToPurge.isNotEmpty()) {
+            val rootRef = FirebaseDatabase.getInstance().reference
+            val studentDeletions = mutableMapOf<String, Any?>()
+
+            keysToPurge.forEach { key ->
+                childrenDisplayMap.remove(key)
+                childrenPhotoMap.remove(key)
+                // This ensures the child is removed from the Driver Dashboard source
+                studentDeletions["students/$key"] = null
+                Log.d("🔥", "Cleanup: Removing $key from students node")
+            }
+
+            rootRef.updateChildren(studentDeletions)
         }
 
         // 2. RE-OBSERVE: Ensure all existing keys have active listeners
@@ -181,6 +191,42 @@ fun ParentDashboardScreen(
                 viewModel.getDisplayNameFlow(key).collect { displayName ->
                     if (displayName != "Loading..." && displayName.isNotBlank()) {
                         childrenDisplayMap[key] = displayName
+
+                        // AUTO-RENAME LOGIC: If the displayName was edited in Firebase
+                        // and no longer matches the current key, migrate the data.
+                        val expectedKey =
+                            displayName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                        if (key != expectedKey && key.isNotBlank()) {
+                            Log.d("🔥", "Renaming detected: $key -> $expectedKey")
+
+                            val parentKey =
+                                parentName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+                            val rootRef = FirebaseDatabase.getInstance().reference
+
+                            // Get current data to migrate
+                            rootRef.child("parents").child(parentKey).child("children").child(key)
+                                .get().addOnSuccessListener { snapshot ->
+                                val currentData = snapshot.value as? Map<String, Any> ?: emptyMap()
+                                val newData = currentData.toMutableMap()
+                                newData["displayName"] = displayName
+                                newData["childId"] = expectedKey
+
+                                val updates = mutableMapOf<String, Any?>()
+                                // Remove old nodes
+                                updates["parents/$parentKey/children/$key"] = null
+                                updates["students/$key"] = null
+
+                                // Create new nodes
+                                updates["parents/$parentKey/children/$expectedKey"] = newData
+                                updates["students/$expectedKey"] = newData
+
+                                rootRef.updateChildren(updates).addOnSuccessListener {
+                                    Log.d("🔥", "Successfully migrated $key to $expectedKey")
+                                    // Trigger a storage re-scan for the new name
+                                    viewModel.monitorStorageForChildImage(expectedKey)
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -200,12 +246,13 @@ fun ParentDashboardScreen(
                         selectedChild.value = selectedChild.value.copy(photoUrl = finalUrl)
                     }
 
-                    // If Firebase is currently empty, push the default URL to the global 'students' node
-                    // This ensures the Driver Dashboard sees the default image immediately.
-                    if (url.isNullOrBlank() || url == "null") {
-                        database.child("students").child(key).child("photoUrl").setValue(defaultUrl)
+                    // CRITICAL SYNC: Only sync if the key actually exists in our current list
+                    // this prevents "resurrecting" deleted children.
+                    if (childrenKeys.contains(key)) {
+                        val isRealPhoto = !url.isNullOrBlank() && url != "null"
+                        val syncUrl = if (isRealPhoto) url else defaultUrl
+                        database.child("students").child(key).child("photoUrl").setValue(syncUrl)
                     }
-
                     if (finalUrl == defaultUrl) {
                         viewModel.monitorStorageForChildImage(key)
                     }

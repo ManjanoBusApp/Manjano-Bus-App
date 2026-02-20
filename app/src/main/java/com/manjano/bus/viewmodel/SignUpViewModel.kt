@@ -189,15 +189,20 @@ class SignUpViewModel : ViewModel() {
             val newChildKeys = childrenList.map { it.lowercase().replace(Regex("[^a-z0-9]"), "_") }
 
             parentRef.get().addOnSuccessListener { snapshot ->
-                val finalUpdates = mutableMapOf<String, Any?>()
                 val existingKeys = snapshot.children.mapNotNull { it.key }.toSet()
                 val newKeysSet = newChildKeys.toSet()
+                val keysToRemove = existingKeys - newKeysSet
 
-                (existingKeys - newKeysSet).forEach { removedKey ->
-                    finalUpdates["parents/$parentKey/children/$removedKey"] = null
-                    finalUpdates["students/$removedKey"] = null
-                    Log.d("🔥", "🗑️ Child removed: $removedKey synced to students")
+                if (keysToRemove.isNotEmpty()) {
+                    val deletionMap = mutableMapOf<String, Any?>()
+                    keysToRemove.forEach { removedKey ->
+                        deletionMap["parents/$parentKey/children/$removedKey"] = null
+                        deletionMap["students/$removedKey"] = null
+                    }
+                    rootRef.updateChildren(deletionMap)
                 }
+
+                if (childrenList.isEmpty()) return@addOnSuccessListener
 
                 val storage =
                     com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images")
@@ -218,35 +223,43 @@ class SignUpViewModel : ViewModel() {
                                     sanitizedChildName.contains(key, ignoreCase = true)
                         }
 
-                        val finalFileName =
-                            if (chosenBase != null) storage.child(imageBaseNames[chosenBase]!!)
-                            else storage.root.child("Default Image").child("defaultchild.png")
+                        val fileRef = if (chosenBase != null) {
+                            storage.child(imageBaseNames[chosenBase]!!)
+                        } else {
+                            com.google.firebase.storage.FirebaseStorage.getInstance().reference
+                                .child("Default Image")
+                                .child("defaultchild.png")
+                        }
 
-                        finalFileName.downloadUrl.addOnCompleteListener { task ->
+                        fileRef.downloadUrl.addOnCompleteListener { task ->
                             val finalPhotoUrl = if (task.isSuccessful) task.result.toString()
                             else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
 
-                            val childData = mapOf(
-                                "eta" to "Arriving in 5 minutes",
+                            val childData = hashMapOf(
                                 "active" to true,
+                                "childId" to childKey,
                                 "displayName" to childName,
-                                "photoUrl" to finalPhotoUrl,
-                                "status" to "On Route",
+                                "eta" to "Arriving in 5 minutes",
                                 "parentName" to parentName,
-                                "childId" to childKey
+                                "photoUrl" to finalPhotoUrl,
+                                "status" to "On Route"
                             )
 
-                            finalUpdates["parents/$parentKey/children/$childKey"] = childData
-                            finalUpdates["students/$childKey"] = childData
+                            val updates = hashMapOf<String, Any>(
+                                "parents/$parentKey/children/$childKey" to childData,
+                                "students/$childKey" to childData
+                            )
 
-                            rootRef.updateChildren(finalUpdates).addOnSuccessListener {
-                                Log.d("🔥", "✅ Source of Truth Synced: $childKey")
+                            rootRef.updateChildren(updates).addOnSuccessListener {
+                                Log.d(
+                                    "🔥",
+                                    "✅ Schema Sync Success: $childKey for Parent: $parentName"
+                                )
                             }
                         }
                     }
                 }
             }
-
                 .addOnFailureListener { e ->
                     Log.e("🔥", "❌ Failed to list Storage files", e)
                     _uiState.value = _uiState.value.copy(
