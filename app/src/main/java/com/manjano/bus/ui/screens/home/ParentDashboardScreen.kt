@@ -484,11 +484,13 @@ fun ParentDashboardScreen(
                             Icon(
                                 imageVector = Icons.Filled.ArrowDropDown,
                                 contentDescription = "Select child",
-                                modifier = Modifier.clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = { childExpanded.value = !childExpanded.value }
-                                )
+                                modifier = Modifier
+                                    .padding(end = 4.dp) // reduced space to the left of the arrow
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { childExpanded.value = !childExpanded.value }
+                                    )
                             )
                         },
                         modifier = Modifier.fillMaxSize(),
@@ -503,7 +505,6 @@ fun ParentDashboardScreen(
                             unfocusedBorderColor = Color.Gray
                         )
                     )
-
                     DropdownMenu(
                         expanded = childExpanded.value,
                         onDismissRequest = { childExpanded.value = false },
