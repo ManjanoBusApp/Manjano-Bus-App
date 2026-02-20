@@ -335,7 +335,7 @@ fun ParentDashboardScreen(
                 }
 
                 Text(
-                    text = "Hello $displayParentName",
+                    text = "👋 Hello $displayParentName",
                     fontSize = if (uiSizes.isTablet) 24.sp else 20.sp,
                     modifier = Modifier
                         .fillMaxWidth()
