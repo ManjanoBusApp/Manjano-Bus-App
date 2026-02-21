@@ -111,12 +111,16 @@ class ParentDashboardViewModel(
         override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
 
-            // 1. Build complete child data with defaults
+            // Extract displayName and photoUrl if present
             val displayNameRaw = snapshot.child("displayName").getValue(String::class.java)
-            val displayName = if (!displayNameRaw.isNullOrBlank()) displayNameRaw
-            else key.replace("_", " ").split(" ")
-                .joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
+            val displayName = displayNameRaw?.takeIf { it.isNotBlank() }
+                ?: key.replace("_", " ").split(" ")
+                    .joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
 
+            val photoUrl = snapshot.child("photoUrl").getValue(String::class.java)
+                .takeIf { !it.isNullOrBlank() } ?: DEFAULT_CHILD_PHOTO_URL
+
+            // Default fields for missing data
             val eta =
                 snapshot.child("eta").getValue(String::class.java).takeIf { !it.isNullOrBlank() }
                     ?: "Arriving in 5 minutes"
@@ -124,38 +128,38 @@ class ParentDashboardViewModel(
                 snapshot.child("status").getValue(String::class.java).takeIf { !it.isNullOrBlank() }
                     ?: "On Route"
             val active = snapshot.child("active").getValue(Boolean::class.java) ?: true
-            val photoUrl = snapshot.child("photoUrl").getValue(String::class.java)
-                .takeIf { !it.isNullOrBlank() } ?: DEFAULT_CHILD_PHOTO_URL
+            val parentName = _parentDisplayName.value.ifBlank { "Unknown Parent" }
 
+            // Full child object
             val fullChildData = mapOf(
                 "childId" to key,
                 "displayName" to displayName,
-                "parentName" to (_parentDisplayName.value.ifBlank { "Unknown Parent" }),
+                "photoUrl" to photoUrl,
                 "eta" to eta,
                 "status" to status,
                 "active" to active,
-                "photoUrl" to photoUrl
+                "parentName" to parentName
             )
 
-            // 2. Write missing fields back to /parents/{parent}/children/{key}
-            childrenRef.child(key).updateChildren(fullChildData)
-
-            // 3. Mirror to global /students node
-            database.child("students").child(key).setValue(fullChildData)
+            // 1️⃣ Write full data back to parent node (ensures defaults exist immediately)
+            childrenRef.child(key).setValue(fullChildData)
                 .addOnSuccessListener {
-                    Log.d(
-                        "🔥",
-                        "Global student created with full structure: $key"
-                    )
+                    Log.d("🔥", "Child added with full structure under parent: $key")
                 }
                 .addOnFailureListener {
-                    Log.e(
-                        "🔥",
-                        "Failed to create global student $key: ${it.message}"
-                    )
+                    Log.e("🔥", "Failed to write full child data under parent: ${it.message}")
                 }
 
-            // 4. Update UI list
+            // 2️⃣ Mirror to global /students node immediately
+            database.child("students").child(key).setValue(fullChildData)
+                .addOnSuccessListener {
+                    Log.d("🔥", "Global student created with full structure: $key")
+                }
+                .addOnFailureListener {
+                    Log.e("🔥", "Failed to create global student $key: ${it.message}")
+                }
+
+            // 3️⃣ Update UI list
             if (!_childrenKeys.value.contains(key)) {
                 _childrenKeys.value = _childrenKeys.value + key
                 Log.d("🔥", "Detected and Auto-Formatted child: $key")
@@ -200,6 +204,43 @@ class ParentDashboardViewModel(
         override fun onCancelled(error: DatabaseError) {
             Log.e("🔥", "childrenEventListener cancelled: ${error.message}")
         }
+    }
+
+    fun addNewChild(childKey: String, displayName: String) {
+        val normalizedKey = sanitizeKey(childKey)
+        val photoUrl = DEFAULT_CHILD_PHOTO_URL
+        val eta = "Arriving in 5 minutes"
+        val status = "On Route"
+        val active = true
+        val parentName = _parentDisplayName.value.ifBlank { "Unknown Parent" }
+
+        val fullChildData = mapOf(
+            "childId" to normalizedKey,
+            "displayName" to displayName,
+            "photoUrl" to photoUrl,
+            "eta" to eta,
+            "status" to status,
+            "active" to active,
+            "parentName" to parentName
+        )
+
+        // Write to parent node
+        childrenRef.child(normalizedKey).setValue(fullChildData)
+            .addOnSuccessListener {
+                Log.d("🔥", "Child created under parent: $normalizedKey")
+            }
+            .addOnFailureListener {
+                Log.e("🔥", "Failed to create child under parent: ${it.message}")
+            }
+
+        // Mirror to /students node
+        database.child("students").child(normalizedKey).setValue(fullChildData)
+            .addOnSuccessListener {
+                Log.d("🔥", "Child mirrored to students: $normalizedKey")
+            }
+            .addOnFailureListener {
+                Log.e("🔥", "Failed to mirror child to students: ${it.message}")
+            }
     }
 
     init {
