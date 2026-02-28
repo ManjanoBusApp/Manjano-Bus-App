@@ -348,10 +348,16 @@ fun ParentDashboardScreen(
 
                 // FIXED CODE: Handles URL-encoded names and correctly formats a list of first names
                 val trackingText = remember(childrenDisplayMap.size, childrenDisplayMap.values.toList()) {
-                    // We only want 'Pretty Names'. Keys like 'dan_doto' always have underscores.
+                    // Strictly use only clean display names from live map (no raw keys, no stale lowercase)
                     val currentNames = childrenDisplayMap.values
-                        .filter { it.isNotEmpty() && it != "Loading..." && !it.contains("_") }
-                        .map { it.trim().split(" ").firstOrNull() ?: it }
+                        .filter { name ->
+                            name.isNotEmpty() &&
+                                    name != "Loading..." &&
+                                    !name.contains("_") &&                    // exclude raw keys
+                                    name.firstOrNull()
+                                        ?.isUpperCase() == true   // only proper capitalized names
+                        }
+                        .map { it.trim().split(" ").firstOrNull() ?: it.trim() }  // first name only
                         .distinct()
                         .sorted()
 
@@ -362,19 +368,7 @@ fun ParentDashboardScreen(
                             else -> "Tracking " + currentNames.dropLast(1).joinToString(", ") + " & ${currentNames.last()}"
                         }
                     } else {
-                        // Fallback only if Firebase is empty
-                        val fallbackNames = childrenNames.split(",")
-                            .map { it.replace('+', ' ').trim().split(" ").firstOrNull() ?: "" }
-                            .filter { it.isNotEmpty() && !it.contains("_") }
-                            .distinct()
-                            .sorted()
-
-                        when (fallbackNames.size) {
-                            0 -> "Tracking..."
-                            1 -> "Tracking ${fallbackNames[0]}"
-                            2 -> "Tracking ${fallbackNames[0]} & ${fallbackNames[1]}"
-                            else -> "Tracking " + fallbackNames.dropLast(1).joinToString(", ") + " & ${fallbackNames.last()}"
-                        }
+                        "Tracking..."  // simpler fallback when no good names yet
                     }
                 }
 
