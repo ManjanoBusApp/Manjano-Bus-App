@@ -116,8 +116,10 @@ class ParentDashboardViewModel(
                 ?: key.replace("_", " ").split(" ")
                     .joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
 
-            val photoUrl = snapshot.child("photoUrl").getValue(String::class.java)
-                .takeIf { !it.isNullOrBlank() } ?: DEFAULT_CHILD_PHOTO_URL
+            val photoUrlRaw = snapshot.child("photoUrl").getValue(String::class.java).orEmpty()
+            val photoUrl =
+                if (photoUrlRaw.isNotBlank() && photoUrlRaw != "null") photoUrlRaw else ""
+            // Do NOT fallback to DEFAULT here — let repairAllChildImages handle it
 
             val eta =
                 snapshot.child("eta").getValue(String::class.java).takeIf { !it.isNullOrBlank() }
@@ -158,6 +160,10 @@ class ParentDashboardViewModel(
                 _childrenKeys.value = _childrenKeys.value + key
                 Log.d("🔥", "Detected and Auto-Formatted child: $key")
             }
+
+            if (photoUrl.isBlank()) {
+                monitorStorageForChildImage(key)
+            }
         }
 
         override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
@@ -174,8 +180,10 @@ class ParentDashboardViewModel(
                 ?: key.replace("_", " ").split(" ")
                     .joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
 
-            val photoUrl = snapshot.child("photoUrl").getValue(String::class.java)
-                .takeIf { !it.isNullOrBlank() } ?: DEFAULT_CHILD_PHOTO_URL
+            val photoUrlRaw = snapshot.child("photoUrl").getValue(String::class.java).orEmpty()
+            val photoUrl =
+                if (photoUrlRaw.isNotBlank() && photoUrlRaw != "null") photoUrlRaw else ""
+            // Do NOT fallback to DEFAULT here — let repairAllChildImages handle it
 
             val eta =
                 snapshot.child("eta").getValue(String::class.java).takeIf { !it.isNullOrBlank() }
@@ -206,6 +214,10 @@ class ParentDashboardViewModel(
                     .addOnSuccessListener {
                         Log.d("🔥", "Filled missing fields in students/$key")
                     }
+            }
+
+            if (photoUrl.isBlank()) {
+                monitorStorageForChildImage(key)
             }
         }
 
@@ -543,15 +555,35 @@ class ParentDashboardViewModel(
                         else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$encodedFileName?alt=media"
 
                         childrenRef.child(newKey).child("photoUrl").setValue(verifiedUrl).addOnCompleteListener {
-                            childrenRef.child(oldKey).removeValue().addOnSuccessListener {
-                                database.child("decommissionedKeys").child(oldKey).setValue(true)
-                                _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
-                                    remove(oldKey)
-                                    if (!contains(newKey)) add(newKey)
+                            // Force remove old key from UI immediately (prevents ghost duplicate)
+                            _childrenKeys.value = _childrenKeys.value.filter { it != oldKey }
+
+                            childrenRef.child(oldKey).removeValue()
+                                .addOnSuccessListener {
+                                    Log.d("🔥", "Successfully deleted old node: $oldKey")
+                                    database.child("decommissionedKeys").child(oldKey)
+                                        .setValue(true)
+
+                                    // Ensure new key is in list (no duplicate)
+                                    val current = _childrenKeys.value.toMutableList()
+                                    if (!current.contains(newKey)) {
+                                        current.add(newKey)
+                                    }
+                                    _childrenKeys.value =
+                                        current.distinct() // remove any accidental duplicates
+
+                                    onRenamed(newKey)
+                                    Log.d(
+                                        "🔥",
+                                        "Transfer Complete: $oldKey -> $newKey with verified image. UI cleaned."
+                                    )
                                 }
-                                onRenamed(newKey)
-                                Log.d("🔥", "Transfer Complete: $oldKey -> $newKey with verified image.")
-                            }
+                                .addOnFailureListener { error ->
+                                    Log.e(
+                                        "🔥",
+                                        "Failed to delete old node $oldKey: ${error.message}"
+                                    )
+                                }
                         }
                     }
                 }
