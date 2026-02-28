@@ -111,7 +111,6 @@ class ParentDashboardViewModel(
         override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
 
-            // Extract displayName and photoUrl if present
             val displayNameRaw = snapshot.child("displayName").getValue(String::class.java)
             val displayName = displayNameRaw?.takeIf { it.isNotBlank() }
                 ?: key.replace("_", " ").split(" ")
@@ -120,7 +119,6 @@ class ParentDashboardViewModel(
             val photoUrl = snapshot.child("photoUrl").getValue(String::class.java)
                 .takeIf { !it.isNullOrBlank() } ?: DEFAULT_CHILD_PHOTO_URL
 
-            // Default fields for missing data
             val eta =
                 snapshot.child("eta").getValue(String::class.java).takeIf { !it.isNullOrBlank() }
                     ?: "Arriving in 5 minutes"
@@ -130,7 +128,6 @@ class ParentDashboardViewModel(
             val active = snapshot.child("active").getValue(Boolean::class.java) ?: true
             val parentName = _parentDisplayName.value.ifBlank { "Unknown Parent" }
 
-            // Full child object
             val fullChildData = mapOf(
                 "childId" to key,
                 "displayName" to displayName,
@@ -141,7 +138,6 @@ class ParentDashboardViewModel(
                 "parentName" to parentName
             )
 
-            // 1️⃣ Write full data back to parent node (ensures defaults exist immediately)
             childrenRef.child(key).setValue(fullChildData)
                 .addOnSuccessListener {
                     Log.d("🔥", "Child added with full structure under parent: $key")
@@ -150,7 +146,6 @@ class ParentDashboardViewModel(
                     Log.e("🔥", "Failed to write full child data under parent: ${it.message}")
                 }
 
-            // 2️⃣ Mirror to global /students node immediately
             database.child("students").child(key).setValue(fullChildData)
                 .addOnSuccessListener {
                     Log.d("🔥", "Global student created with full structure: $key")
@@ -159,34 +154,67 @@ class ParentDashboardViewModel(
                     Log.e("🔥", "Failed to create global student $key: ${it.message}")
                 }
 
-            // 3️⃣ Update UI list
             if (!_childrenKeys.value.contains(key)) {
                 _childrenKeys.value = _childrenKeys.value + key
                 Log.d("🔥", "Detected and Auto-Formatted child: $key")
             }
         }
 
-        override fun onChildChanged(
-            snapshot: DataSnapshot,
-            previousChildName: String?
-        ) {
+        override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
+
             viewModelScope.launch {
-                // Force update the children keys to trigger UI refresh when display names change
                 _childrenKeys.value = _childrenKeys.value.toMutableList().apply {
                     Log.d("🔥", "childrenEventListener: onChildChanged -> $key")
                 }
+            }
+
+            val displayNameRaw = snapshot.child("displayName").getValue(String::class.java)
+            val displayName = displayNameRaw?.takeIf { it.isNotBlank() }
+                ?: key.replace("_", " ").split(" ")
+                    .joinToString(" ") { it.replaceFirstChar { c -> c.uppercaseChar() } }
+
+            val photoUrl = snapshot.child("photoUrl").getValue(String::class.java)
+                .takeIf { !it.isNullOrBlank() } ?: DEFAULT_CHILD_PHOTO_URL
+
+            val eta =
+                snapshot.child("eta").getValue(String::class.java).takeIf { !it.isNullOrBlank() }
+                    ?: "Arriving in 5 minutes"
+            val status =
+                snapshot.child("status").getValue(String::class.java).takeIf { !it.isNullOrBlank() }
+                    ?: "On Route"
+            val active = snapshot.child("active").getValue(Boolean::class.java) ?: true
+            val parentName = _parentDisplayName.value.ifBlank { "Unknown Parent" }
+
+            val updates = mutableMapOf<String, Any>()
+
+            if (!snapshot.hasChild("childId")) updates["childId"] = key
+            if (!snapshot.hasChild("displayName")) updates["displayName"] = displayName
+            if (!snapshot.hasChild("photoUrl")) updates["photoUrl"] = photoUrl
+            if (!snapshot.hasChild("eta")) updates["eta"] = eta
+            if (!snapshot.hasChild("status")) updates["status"] = status
+            if (!snapshot.hasChild("active")) updates["active"] = active
+            if (!snapshot.hasChild("parentName")) updates["parentName"] = parentName
+
+            if (updates.isNotEmpty()) {
+                childrenRef.child(key).updateChildren(updates)
+                    .addOnSuccessListener {
+                        Log.d("🔥", "Filled missing fields in parent/children/$key")
+                    }
+
+                database.child("students").child(key).updateChildren(updates)
+                    .addOnSuccessListener {
+                        Log.d("🔥", "Filled missing fields in students/$key")
+                    }
             }
         }
 
         override fun onChildRemoved(snapshot: DataSnapshot) {
             val childKey = snapshot.key ?: return
 
-            // 1. Remove from parent's UI immediately
             _childrenKeys.value = _childrenKeys.value.filter { it != childKey }
             Log.d("🔥", "Child removed from parent: $childKey")
 
-            // 2. 🔥 CRITICAL: Mirror deletion to global students node
             database.child("students").child(childKey)
                 .removeValue()
                 .addOnSuccessListener {
@@ -196,7 +224,6 @@ class ParentDashboardViewModel(
                     Log.e("🔥", "Failed to remove student $childKey: ${e.message}")
                 }
         }
-
 
         override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) { /* ignore */
         }
