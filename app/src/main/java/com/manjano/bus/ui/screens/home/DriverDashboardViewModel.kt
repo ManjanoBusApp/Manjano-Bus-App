@@ -86,7 +86,9 @@ class DriverDashboardViewModel @Inject constructor(
             .addValueEventListener(object : com.google.firebase.database.ValueEventListener {
                 override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                     val list = snapshot.children.mapNotNull { child ->
-                        child.getValue(Student::class.java)
+                        val student = child.getValue(Student::class.java) ?: return@mapNotNull null
+                        // Fix encoded parent name: replace + with space (from URL encoding)
+                        student.copy(parentName = student.parentName.replace("+", " "))
                     }
                     _studentList.value = list
                 }

@@ -225,7 +225,7 @@ fun DashboardContent(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = "Parent: ${student.parentName}",
+                                text = "Parent: ${student.parentName.replace("+", " ")}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = Color.Gray
                             )
