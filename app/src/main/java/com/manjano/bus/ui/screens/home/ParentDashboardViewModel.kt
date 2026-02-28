@@ -154,7 +154,7 @@ class ParentDashboardViewModel(
                     Log.e("🔥", "Failed to create global student $key: ${it.message}")
                 }
 
-            if (!_childrenKeys.value.contains(key)) {
+            if (!_childrenKeys.value.contains(key) && key == sanitizeKey(key)) {
                 _childrenKeys.value = _childrenKeys.value + key
                 Log.d("🔥", "Detected and Auto-Formatted child: $key")
             }
@@ -519,6 +519,9 @@ class ParentDashboardViewModel(
     }
 
     private fun renameChildNode(oldKey: String, newKey: String, onRenamed: (String) -> Unit = {}) {
+        // Prevent duplicate in UI during rename: remove old key immediately
+        _childrenKeys.value = _childrenKeys.value.filter { it != oldKey }
+
         childrenRef.child(oldKey).get().addOnSuccessListener { snapshot ->
             if (!snapshot.exists()) return@addOnSuccessListener
 
