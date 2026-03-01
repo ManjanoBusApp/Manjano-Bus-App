@@ -129,7 +129,6 @@ fun ParentDashboardScreen(
         }
     }
 
-
     val database = FirebaseDatabase.getInstance().reference
     val selectedAction = remember { mutableStateOf("Contact Driver") }
     val showTextBox = remember { mutableStateOf(false) }
@@ -166,23 +165,28 @@ fun ParentDashboardScreen(
     var storageFiles by remember { mutableStateOf<List<String>>(emptyList()) }
 
     LaunchedEffect(childrenKeys) {
-        // 1. CLEANUP: Sync deletions with the global students node and local maps
+        // 1. CLEANUP: Purge any stale child data when keys change or disappear
         val currentKeysSet = childrenKeys.toSet()
-        val keysToPurge = childrenDisplayMap.keys.filter { it !in currentKeysSet }
+        val keysToPurge = childrenDisplayMap.keys.filter { it !in currentKeysSet }.toList()
 
-        if (keysToPurge.isNotEmpty()) {
-            val rootRef = FirebaseDatabase.getInstance().reference
-            val studentDeletions = mutableMapOf<String, Any?>()
-
+        if (keysToPurge.isNotEmpty() || childrenKeys.isEmpty()) {  // also clear everything if no keys left
             keysToPurge.forEach { key ->
                 childrenDisplayMap.remove(key)
                 childrenPhotoMap.remove(key)
-                // This ensures the child is removed from the Driver Dashboard source
-                studentDeletions["students/$key"] = null
-                Log.d("🔥", "Cleanup: Removing $key from students node")
+                Log.d("🔥", "Cleanup: Removed stale child $key (no longer in keys)")
             }
 
-            rootRef.updateChildren(studentDeletions)
+            // If no children left at all → force full clear
+            if (childrenKeys.isEmpty()) {
+                childrenDisplayMap.clear()
+                childrenPhotoMap.clear()
+                Log.d("🔥", "No children left - fully cleared display/photo maps")
+            }
+
+            // Optional: clean global students (good for driver dashboard sync)
+            val rootRef = FirebaseDatabase.getInstance().reference
+            val deletions = keysToPurge.associate { "students/$it" to null }
+            rootRef.updateChildren(deletions as Map<String, Any?>)
         }
 
         // 2. RE-OBSERVE: Ensure all existing keys have active listeners
@@ -327,48 +331,51 @@ fun ParentDashboardScreen(
 
                 val displayParentName = remember(liveParentName, parentName) {
                     val nameToProcess = if (liveParentName.isNotEmpty()) liveParentName else parentName
-                    nameToProcess
+                    if (nameToProcess.isBlank()) "" else nameToProcess
                         .replace('+', ' ')
                         .trim()
                         .split(" ")
-                        .firstOrNull() ?: nameToProcess
+                        .firstOrNull() ?: nameToProcess.trim()
                 }
 
                 Text(
-                    text = "👋 Hello $displayParentName",
+                    text = if (displayParentName.isBlank()) "👋 Hello" else "👋 Hello $displayParentName",
                     fontSize = if (uiSizes.isTablet) 24.sp else 20.sp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(bottom = 4.dp)
                         .semantics {
-                            contentDescription = "Greeting: Hello $displayParentName"
+                            contentDescription =
+                                if (displayParentName.isBlank()) "Greeting: Hello" else "Greeting: Hello $displayParentName"
                         },
                     textAlign = TextAlign.Center
                 )
 
-                // FIXED CODE: Handles URL-encoded names and correctly formats a list of first names
-                val trackingText = remember(childrenDisplayMap.size, childrenDisplayMap.values.toList()) {
-                    // Strictly use only clean display names from live map (no raw keys, no stale lowercase)
+                // Tracking header: use live data first, clear message when no children
+                val trackingText = remember(childrenDisplayMap.size, childrenKeys.size) {
                     val currentNames = childrenDisplayMap.values
                         .filter { name ->
                             name.isNotEmpty() &&
                                     name != "Loading..." &&
-                                    !name.contains("_") &&                    // exclude raw keys
-                                    name.firstOrNull()
-                                        ?.isUpperCase() == true   // only proper capitalized names
+                                    !name.contains("_") &&
+                                    name.firstOrNull()?.isUpperCase() == true
                         }
-                        .map { it.trim().split(" ").firstOrNull() ?: it.trim() }  // first name only
+                        .map { it.trim().split(" ").firstOrNull() ?: it.trim() }
                         .distinct()
                         .sorted()
 
-                    if (currentNames.isNotEmpty()) {
-                        when (currentNames.size) {
-                            1 -> "Tracking ${currentNames[0]}"
-                            2 -> "Tracking ${currentNames[0]} & ${currentNames[1]}"
-                            else -> "Tracking " + currentNames.dropLast(1).joinToString(", ") + " & ${currentNames.last()}"
+                    when {
+                        currentNames.isNotEmpty() -> {
+                            when (currentNames.size) {
+                                1 -> "Tracking ${currentNames[0]}"
+                                2 -> "Tracking ${currentNames[0]} & ${currentNames[1]}"
+                                else -> "Tracking " + currentNames.dropLast(1)
+                                    .joinToString(", ") + " & ${currentNames.last()}"
+                            }
                         }
-                    } else {
-                        "Tracking..."  // simpler fallback when no good names yet
+
+                        childrenKeys.isEmpty() -> "Tracking No Child"  // Clear message when no children left
+                        else -> "Tracking..."  // Loading state
                     }
                 }
 
@@ -386,21 +393,17 @@ fun ParentDashboardScreen(
                 val childrenKeys by viewModel.childrenKeys.collectAsState(initial = emptyList())
                 val sortedChildrenKeys = childrenKeys.sorted()
 
+                // Dropdown names: strictly live data only – no fallback to old param
                 val allChildrenNamesForDisplay by remember(childrenKeys, childrenDisplayMap.size) {
-                    // 1. Get names from the live display map
-                    // 2. Filter out anything that looks like a raw key (contains underscore)
                     val liveNames = childrenKeys.mapNotNull { key ->
-                        childrenDisplayMap[key]
-                    }.filter { !it.contains("_") && it != "Loading..." }.toSet()
+                        childrenDisplayMap[key]?.takeIf {
+                            it.isNotBlank() &&
+                                    it != "Loading..." &&
+                                    !it.contains("_")
+                        }
+                    }.distinct().sorted()
 
-                    val namesToDisplay = if (liveNames.isNotEmpty()) {
-                        liveNames.toList().sorted()
-                    } else {
-                        // Only use params if DB is totally empty
-                        sortedDisplayNamesFromParam.filter { !it.contains("_") }
-                    }
-
-                    mutableStateOf(namesToDisplay)
+                    mutableStateOf(liveNames)
                 }
 
                 val context = LocalContext.current
@@ -437,32 +440,44 @@ fun ParentDashboardScreen(
                 }
 
                 LaunchedEffect(sortedChildrenKeys, childrenDisplayMap.size) {
-                    val currentName = selectedChild.value.name
+                    if (sortedChildrenKeys.isEmpty()) {
+                        // No children left → reset selected child to empty/default
+                        selectedChild.value = Child(
+                            name = "",
+                            photoUrl = defaultPhotoUrl,
+                            status = "No Child Selected",
+                            eta = "",
+                            active = false
+                        )
+                        Log.d("🔥", "No children left - reset selectedChild to empty")
+                    } else {
+                        val currentName = selectedChild.value.name
 
-                    // Find a key where the display name is a "Pretty Name" (no underscores)
-                    val targetKey = sortedChildrenKeys.find { key ->
-                        val displayName = childrenDisplayMap[key]
-                        displayName?.equals(currentName, ignoreCase = true) == true && !displayName.contains("_")
-                    } ?: sortedChildrenKeys.firstOrNull { key ->
-                        !(childrenDisplayMap[key]?.contains("_") ?: true)
-                    }
+                        val targetKey = sortedChildrenKeys.find { key ->
+                            val displayName = childrenDisplayMap[key]
+                            displayName?.equals(
+                                currentName,
+                                ignoreCase = true
+                            ) == true && !displayName.contains("_")
+                        } ?: sortedChildrenKeys.firstOrNull { key ->
+                            !(childrenDisplayMap[key]?.contains("_") ?: true)
+                        }
 
-                    if (targetKey != null) {
-                        val liveName = childrenDisplayMap[targetKey]
-                        val livePhotoUrl = childrenPhotoMap[targetKey] ?: defaultPhotoUrl
+                        if (targetKey != null) {
+                            val liveName = childrenDisplayMap[targetKey]
+                            val livePhotoUrl = childrenPhotoMap[targetKey] ?: defaultPhotoUrl
 
-                        // Only update if we have a valid, non-key name
-                        if (liveName != null && !liveName.contains("_") && liveName != "Loading...") {
-                            if (currentName != liveName) {
-                                selectedChild.value = selectedChild.value.copy(
-                                    name = liveName,
-                                    photoUrl = livePhotoUrl
-                                )
+                            if (liveName != null && !liveName.contains("_") && liveName != "Loading...") {
+                                if (currentName != liveName) {
+                                    selectedChild.value = selectedChild.value.copy(
+                                        name = liveName,
+                                        photoUrl = livePhotoUrl
+                                    )
+                                }
                             }
                         }
                     }
                 }
-
                 Box(
                     modifier = Modifier
                         .width(uiSizes.dropdownWidth)
