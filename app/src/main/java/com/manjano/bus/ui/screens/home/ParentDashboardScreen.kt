@@ -327,15 +327,36 @@ fun ParentDashboardScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
 
+                // Add liveParentKey to force recompute when parent is deleted (key becomes blank)
                 val liveParentName by viewModel.parentDisplayName.collectAsState()
 
-                val displayParentName = remember(liveParentName, parentName) {
-                    val nameToProcess = if (liveParentName.isNotEmpty()) liveParentName else parentName
-                    if (nameToProcess.isBlank()) "" else nameToProcess
-                        .replace('+', ' ')
-                        .trim()
-                        .split(" ")
-                        .firstOrNull() ?: nameToProcess.trim()
+                // Use mutableStateOf with explicit key to force recomposition on every change
+                var displayParentName by remember(liveParentName) { mutableStateOf("") }
+
+                LaunchedEffect(liveParentName) {
+                    if (liveParentName.isBlank()) {
+                        // Parent deleted → force blank immediately
+                        displayParentName = ""
+                        Log.d("🔥", "UI: liveParentName is blank → forced greeting to '👋 Hello'")
+                    } else {
+                        val nameToProcess =
+                            if (liveParentName.isNotEmpty()) liveParentName else parentName
+                        val cleaned = nameToProcess
+                            .replace('+', ' ')
+                            .trim()
+                            .split(" ")
+                            .firstOrNull() ?: nameToProcess.trim()
+                        displayParentName = cleaned
+                        Log.d("🔥", "UI: Updated greeting to '👋 Hello $cleaned'")
+                    }
+                }
+
+                // Safety reset when screen first appears (if parent already deleted)
+                LaunchedEffect(Unit) {
+                    if (liveParentName.isBlank()) {
+                        displayParentName = ""
+                        Log.d("🔥", "UI on entry: liveParentName blank → reset greeting")
+                    }
                 }
 
                 Text(
@@ -350,7 +371,6 @@ fun ParentDashboardScreen(
                         },
                     textAlign = TextAlign.Center
                 )
-
                 // Tracking header: use live data first, clear message when no children
                 val trackingText = remember(childrenDisplayMap.size, childrenKeys.size) {
                     val currentNames = childrenDisplayMap.values

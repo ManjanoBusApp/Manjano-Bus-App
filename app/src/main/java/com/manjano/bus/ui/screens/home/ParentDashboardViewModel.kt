@@ -298,27 +298,43 @@ class ParentDashboardViewModel(
                         .addValueEventListener(object : ValueEventListener {
                             private var isMigrating = false
                             override fun onDataChange(snapshot: DataSnapshot) {
-                                val remoteName = snapshot.getValue(String::class.java) ?: return
-                                _parentDisplayName.value = remoteName
-                                val targetKey = sanitizeKey(remoteName)
-                                if (key != targetKey && !isMigrating && targetKey.isNotEmpty()) {
-                                    isMigrating = true
-                                    currentParentRef.get().addOnSuccessListener { dataSnap ->
-                                        if (dataSnap.exists()) {
-                                            database.child("parents").child(targetKey)
-                                                .setValue(dataSnap.value).addOnSuccessListener {
-                                                    _parentKey.value = targetKey
-                                                    currentParentRef.removeValue()
-                                                        .addOnCompleteListener { isMigrating = false }
-                                                }
+                                val remoteName = snapshot.getValue(String::class.java)
+                                if (remoteName == null || remoteName.isBlank()) {
+                                    // Parent or display name node deleted → force clear so UI shows only "👋 Hello"
+                                    _parentDisplayName.value = ""
+                                    Log.d(
+                                        "🔥",
+                                        "Parent _displayName deleted or empty - cleared name in UI"
+                                    )
+                                } else {
+                                    _parentDisplayName.value = remoteName
+                                    val targetKey = sanitizeKey(remoteName)
+                                    if (key != targetKey && !isMigrating && targetKey.isNotEmpty()) {
+                                        isMigrating = true
+                                        currentParentRef.get().addOnSuccessListener { dataSnap ->
+                                            if (dataSnap.exists()) {
+                                                database.child("parents").child(targetKey)
+                                                    .setValue(dataSnap.value).addOnSuccessListener {
+                                                        _parentKey.value = targetKey
+                                                        currentParentRef.removeValue()
+                                                            .addOnCompleteListener {
+                                                                isMigrating = false
+                                                            }
+                                                    }
+                                            }
                                         }
                                     }
                                 }
                             }
 
-                            override fun onCancelled(error: DatabaseError) {}
+                            override fun onCancelled(error: DatabaseError) {
+                                Log.e(
+                                    "🔥",
+                                    "Parent display name listener cancelled: ${error.message}"
+                                )
+                                _parentDisplayName.value = ""  // Safety: clear on any error
+                            }
                         })
-
                     childrenRef.addChildEventListener(childrenEventListener)
 
                     childrenRef.addValueEventListener(object : ValueEventListener {
