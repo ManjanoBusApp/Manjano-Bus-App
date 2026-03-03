@@ -324,7 +324,7 @@ fun ParentDashboardScreen(
                     .fillMaxWidth()                  // full width for right alignment
                     .padding(
                         top = uiSizes.topBarHeight + 8.dp,
-                        end = 16.dp
+                        end = 0.dp                   // touches right edge, no gap
                     ) // just below purple banner with small gap
             ) {
                 Text(
@@ -335,10 +335,15 @@ fun ParentDashboardScreen(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)  // far right
                         .semantics { contentDescription = "Sign Out button" }
-                        .clickable { /* Placeholder: action later */ }
+                        .clickable {
+                            Log.d("🔥", "Sign Out text clicked - navigating to welcome")
+                            navController.navigate("welcome") {
+                                popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        }
                 )
             }
-
             Column(
                 modifier = Modifier
                     .fillMaxSize()
@@ -1015,6 +1020,6 @@ fun ParentDashboardScreen(
                     }
                 }
             }
-        }
-    )
+        })
 }
+
