@@ -55,8 +55,15 @@ import com.manjano.bus.R
 import coil.compose.rememberAsyncImagePainter
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
-
-
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import coil.compose.rememberAsyncImagePainter
+import coil.request.ImageRequest
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
 
 
 
@@ -152,14 +159,43 @@ fun DashboardContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .padding(bottom = 32.dp)
+                    .padding(
+                        horizontal = 16.dp,
+                        vertical = 0.dp
+                    )  // removes ALL top/bottom padding → pushes header to very top
             ) {
                 item {
                     Column(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        // Sign Out text first (pushed up)
+                        Text(
+                            text = "Sign Out",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.Red,
+                            modifier = Modifier
+                                .align(Alignment.End)  // right-aligned
+                                .padding(bottom = 4.dp)  // small space between Sign Out and grey line
+                                .semantics { contentDescription = "Sign Out button" }
+                                .clickable { /* Placeholder - navigation added later */ }
+                        )
+
+                        // Grey divider line now BELOW Sign Out
+                        HorizontalDivider(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .padding(bottom = 4.dp)
+                        )
+                    }
+                    // scroll up and Student List now below the row
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        HorizontalDivider(modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
                         Text(
                             text = "scroll up",
                             style = MaterialTheme.typography.labelSmall,
@@ -194,25 +230,25 @@ fun DashboardContent(
                                 "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
 
                             val imagePainter = coil.compose.rememberAsyncImagePainter(
-                                model = coil.request.ImageRequest.Builder(androidx.compose.ui.platform.LocalContext.current)
+                                model = coil.request.ImageRequest.Builder(LocalContext.current)
                                     .data(if (student.photoUrl.isNullOrBlank() || student.photoUrl == "null") storageDefaultUrl else student.photoUrl)
                                     .crossfade(true)
                                     .build()
                             )
 
-                            androidx.compose.foundation.Image(
+                            Image(
                                 painter = imagePainter,
                                 contentDescription = "Student Photo",
                                 modifier = Modifier.fillMaxSize(),
-                                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                contentScale = ContentScale.Crop
                             )
 
                             if (imagePainter.state is coil.compose.AsyncImagePainter.State.Loading || imagePainter.state is coil.compose.AsyncImagePainter.State.Error) {
-                                androidx.compose.foundation.Image(
-                                    painter = androidx.compose.ui.res.painterResource(com.manjano.bus.R.drawable.defaultchild),
+                                Image(
+                                    painter = painterResource(R.drawable.defaultchild),
                                     contentDescription = null,
                                     modifier = Modifier.fillMaxSize(),
-                                    contentScale = androidx.compose.ui.layout.ContentScale.Crop
+                                    contentScale = ContentScale.Crop
                                 )
                             }
                         }
