@@ -289,6 +289,7 @@ fun ParentDashboardScreen(
             SnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier.padding(16.dp)
+
             )
         },
         topBar = {
@@ -317,11 +318,36 @@ fun ParentDashboardScreen(
             val messageBoxOffsetY = remember { mutableStateOf(0) }
             val density = LocalDensity.current
 
+            // Inside Scaffold content, above the Column
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()                  // full width for right alignment
+                    .padding(
+                        top = uiSizes.topBarHeight + 8.dp,
+                        end = 16.dp
+                    ) // just below purple banner with small gap
+            ) {
+                Text(
+                    text = "Sign Out",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Red,
+                    modifier = Modifier
+                        .align(Alignment.CenterEnd)  // far right
+                        .semantics { contentDescription = "Sign Out button" }
+                        .clickable { /* Placeholder: action later */ }
+                )
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .padding(if (uiSizes.isTablet) 24.dp else 16.dp)
+                    .padding(
+                        top = if (uiSizes.isTablet) 24.dp else 16.dp + 32.dp, // extra space below Sign Out
+                        start = if (uiSizes.isTablet) 24.dp else 16.dp,
+                        end = if (uiSizes.isTablet) 24.dp else 16.dp
+                    )
                     .verticalScroll(scrollState)
                     .imePadding(),
                 horizontalAlignment = Alignment.CenterHorizontally
