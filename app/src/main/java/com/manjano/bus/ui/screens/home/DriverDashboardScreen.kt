@@ -200,7 +200,7 @@ fun DashboardContent(
 
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 80.dp)
                 ) {
                     items(students) { student ->
                         Row(
