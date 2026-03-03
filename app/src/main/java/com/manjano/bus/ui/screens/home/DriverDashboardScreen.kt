@@ -64,7 +64,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
-
+import androidx.compose.foundation.layout.PaddingValues
 
 
 @OptIn(ExperimentalPermissionsApi::class)
@@ -155,110 +155,109 @@ fun DashboardContent(
         sheetPeekHeight = 180.dp,
         sheetContainerColor = Color.White,
         sheetContent = {
-            LazyColumn(
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                item {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 2.dp, bottom = 2.dp) // reduced from 10.dp → 2.dp
-                    ) {
-                        Text(
-                            text = "Sign Out",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.Red,
-                            modifier = Modifier
-                                .align(Alignment.End)
-                                .padding(bottom = 2.dp)
-                                .semantics { contentDescription = "Sign Out button" }
-                                .clickable { /* Placeholder - navigation added later */ }
-                        )
+                // Sign Out pinned at the top
+                Text(
+                    text = "Sign Out",
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.Red,
+                    modifier = Modifier
+                        .align(Alignment.End)
+                        .padding(bottom = 2.dp)
+                        .clickable { /* Placeholder - navigation added later */ }
+                )
 
-                        HorizontalDivider(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(1.dp)
-                                .padding(bottom = 4.dp)
-                        )
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 0.dp),
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Text(
-                                text = "scroll up",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = Color.Red,
-                                modifier = Modifier.padding(bottom = 4.dp)
-                            )
-                            Text(
-                                text = "Student List",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.Black,
-                                textAlign = TextAlign.Center
-                            )
-                        }
-                    }
+                HorizontalDivider(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .padding(bottom = 4.dp)
+                )
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = "scroll up",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = Color.Red,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    )
+                    Text(
+                        text = "Student List",
+                        style = MaterialTheme.typography.headlineMedium,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.Black,
+                        textAlign = TextAlign.Center
+                    )
                 }
-                items(students) { student ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 12.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
+
+                LazyColumn(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentPadding = PaddingValues(top = 8.dp, bottom = 16.dp)
+                ) {
+                    items(students) { student ->
+                        Row(
                             modifier = Modifier
-                                .size(50.dp)
-                                .clip(CircleShape)
-                                .background(Color.LightGray)
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            val storageDefaultUrl =
-                                "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
+                            Box(
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.LightGray)
+                            ) {
+                                val storageDefaultUrl =
+                                    "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
 
-                            val imagePainter = coil.compose.rememberAsyncImagePainter(
-                                model = coil.request.ImageRequest.Builder(LocalContext.current)
-                                    .data(if (student.photoUrl.isNullOrBlank() || student.photoUrl == "null") storageDefaultUrl else student.photoUrl)
-                                    .crossfade(true)
-                                    .build()
-                            )
+                                val imagePainter = rememberAsyncImagePainter(
+                                    model = ImageRequest.Builder(LocalContext.current)
+                                        .data(if (student.photoUrl.isNullOrBlank() || student.photoUrl == "null") storageDefaultUrl else student.photoUrl)
+                                        .crossfade(true)
+                                        .build()
+                                )
 
-                            Image(
-                                painter = imagePainter,
-                                contentDescription = "Student Photo",
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Crop
-                            )
-
-                            if (imagePainter.state is coil.compose.AsyncImagePainter.State.Loading || imagePainter.state is coil.compose.AsyncImagePainter.State.Error) {
                                 Image(
-                                    painter = painterResource(R.drawable.defaultchild),
-                                    contentDescription = null,
+                                    painter = imagePainter,
+                                    contentDescription = "Student Photo",
                                     modifier = Modifier.fillMaxSize(),
                                     contentScale = ContentScale.Crop
                                 )
+
+                                if (imagePainter.state is coil.compose.AsyncImagePainter.State.Loading ||
+                                    imagePainter.state is coil.compose.AsyncImagePainter.State.Error
+                                ) {
+                                    Image(
+                                        painter = painterResource(R.drawable.defaultchild),
+                                        contentDescription = null,
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Crop
+                                    )
+                                }
                             }
-                        }
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = student.displayName,
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = Color.Black,
-                                fontWeight = FontWeight.Bold
-                            )
-                            Text(
-                                text = "Parent: ${student.parentName.replace("+", " ")}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = Color.Gray
-                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = student.displayName,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = Color.Black,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(
+                                    text = "Parent: ${student.parentName.replace("+", " ")}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = Color.Gray
+                                )
+                            }
                         }
                     }
                 }
