@@ -146,7 +146,7 @@ fun DashboardContent(
 
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = rememberStandardBottomSheetState(
-            initialValue = SheetValue.PartiallyExpanded
+            initialValue = SheetValue.Expanded
         )
     )
 
@@ -159,59 +159,53 @@ fun DashboardContent(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
-                    .padding(
-                        horizontal = 16.dp,
-                        vertical = 0.dp
-                    )  // removes ALL top/bottom padding → pushes header to very top
             ) {
                 item {
                     Column(
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp, bottom = 2.dp) // reduced from 10.dp → 2.dp
                     ) {
-                        // Sign Out text first (pushed up)
                         Text(
                             text = "Sign Out",
                             fontSize = 15.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.Red,
                             modifier = Modifier
-                                .align(Alignment.End)  // right-aligned
-                                .padding(bottom = 4.dp)  // small space between Sign Out and grey line
+                                .align(Alignment.End)
+                                .padding(bottom = 2.dp)
                                 .semantics { contentDescription = "Sign Out button" }
                                 .clickable { /* Placeholder - navigation added later */ }
                         )
 
-                        // Grey divider line now BELOW Sign Out
                         HorizontalDivider(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(1.dp)
                                 .padding(bottom = 4.dp)
                         )
-                    }
-                    // scroll up and Student List now below the row
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(
-                            text = "scroll up",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.Red,
-                            modifier = Modifier.padding(bottom = 4.dp)
-                        )
-                        Text(
-                            text = "Student List",
-                            style = MaterialTheme.typography.headlineMedium,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.Black,
-                            textAlign = TextAlign.Center
-                        )
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 0.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "scroll up",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Red,
+                                modifier = Modifier.padding(bottom = 4.dp)
+                            )
+                            Text(
+                                text = "Student List",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.Black,
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
                 }
-
                 items(students) { student ->
                     Row(
                         modifier = Modifier
