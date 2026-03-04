@@ -146,10 +146,9 @@ fun DashboardContent(
 
     val scaffoldState = rememberBottomSheetScaffoldState(
         bottomSheetState = rememberStandardBottomSheetState(
-            initialValue = SheetValue.Expanded
+            initialValue = SheetValue.PartiallyExpanded
         )
     )
-
     BottomSheetScaffold(
         scaffoldState = scaffoldState,
         sheetPeekHeight = 180.dp,
@@ -165,7 +164,7 @@ fun DashboardContent(
                     text = "Sign Out",
                     fontSize = 15.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.Red,
+                    color = Color.Black,
                     modifier = Modifier
                         .align(Alignment.End)
                         .padding(bottom = 2.dp)
@@ -184,9 +183,9 @@ fun DashboardContent(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "scroll up",
+                        text = "Please Scroll Up",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.Red,
+                        color = Color(0xFF800080),
                         modifier = Modifier.padding(bottom = 4.dp)
                     )
                     Text(
@@ -266,7 +265,9 @@ fun DashboardContent(
     ) { paddingValues ->
         Box(modifier = Modifier
             .padding(paddingValues)
-            .fillMaxSize()) {
+            .fillMaxSize()
+            .padding(top = 32.dp)  // ← small white padding at top (below status bar)
+        ) {
             GoogleMap(
                 modifier = Modifier.fillMaxSize(),
                 cameraPositionState = cameraPositionState,
@@ -276,27 +277,23 @@ fun DashboardContent(
                 )
             )
 
-            Column(
+            // Start/End Trip button - moved to top, fixed position, always visible
+            Button(
+                onClick = { viewModel.toggleTracking() },
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(16.dp)
-                    .fillMaxWidth()
+                    .align(Alignment.TopCenter)
+                    .padding(top = 32.dp)
+                    .fillMaxWidth(0.8f)
+                    .height(56.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isTracking) Color.Red else Color(0xFF4CAF50)
+                )
             ) {
-                Button(
-                    onClick = { viewModel.toggleTracking() },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(64.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isTracking) Color.Red else Color(0xFF4CAF50)
-                    )
-                ) {
-                    Text(
-                        text = if (isTracking) "END TRIP" else "START TRIP",
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = Color.White
-                    )
-                }
+                Text(
+                    text = if (isTracking) "END TRIP" else "START TRIP",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White
+                )
             }
         }
     }
