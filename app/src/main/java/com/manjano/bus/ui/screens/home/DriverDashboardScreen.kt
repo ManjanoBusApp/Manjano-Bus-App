@@ -120,7 +120,7 @@ fun DriverDashboardScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun DashboardContent(
-    _navController: NavHostController,
+    navController: NavHostController,
     viewModel: DriverDashboardViewModel
 ) {
     val isTracking by viewModel.isTracking.collectAsState()
@@ -168,7 +168,10 @@ fun DashboardContent(
                     modifier = Modifier
                         .align(Alignment.End)
                         .padding(bottom = 2.dp)
-                        .clickable { /* Placeholder - navigation added later */ }
+                        .clickable {
+                            // Simple navigation to Welcome screen
+                            navController.navigate("welcome")
+                        }
                 )
 
                 HorizontalDivider(
