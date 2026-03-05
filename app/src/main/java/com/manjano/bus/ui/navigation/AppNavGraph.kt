@@ -22,7 +22,12 @@ import java.nio.charset.StandardCharsets
 import androidx.navigation.NavType
 import com.manjano.bus.viewmodel.SignUpViewModel
 import com.manjano.bus.ui.screens.home.DriverDashboardViewModel
-
+import com.manjano.bus.ui.screens.adminpanel.BusTrackingScreen
+import com.manjano.bus.ui.screens.adminpanel.SendNotificationsScreen
+import com.manjano.bus.ui.screens.adminpanel.ProfileEditScreen
+import com.manjano.bus.ui.screens.adminpanel.AttendanceVerificationScreen
+import com.manjano.bus.ui.screens.adminpanel.DriverCommunicationScreen
+import com.manjano.bus.ui.screens.login.AdminSignInScreen
 
 @Composable
 fun AppNavGraph(navController: NavHostController) {
@@ -30,14 +35,17 @@ fun AppNavGraph(navController: NavHostController) {
         navController = navController,
         startDestination = "welcome"
     ) {
+
+        // Welcome
         composable("welcome") { _: NavBackStackEntry ->
             WelcomeScreen(
                 onParentClick = { navController.navigate("signin/parent") },
                 onDriverClick = { navController.navigate("signin/driver") },
-                onAdminClick = { navController.navigate("signin/admin") }
+                onAdminClick = { navController.navigate("admin_signin") }
             )
         }
 
+        // Signin with role
         composable(
             route = "signin/{role}",
             arguments = listOf(navArgument("role") { type = NavType.StringType })
@@ -48,23 +56,27 @@ fun AppNavGraph(navController: NavHostController) {
             SignInScreen(
                 navController = navController,
                 viewModel = signInViewModel,
-                signUpViewModel = signUpViewModel, // Added
+                signUpViewModel = signUpViewModel,
                 role = role
             )
         }
 
+        // Signup
         composable("signup") { _: NavBackStackEntry ->
             SignupScreen(navController = navController)
         }
 
+        // Driver Signup
         composable("driver_signup") { _: NavBackStackEntry ->
             DriverSignupScreen(navController = navController)
         }
 
+        // Admin Signup
         composable("admin_signup") { _: NavBackStackEntry ->
             AdminSignupScreen(navController = navController)
         }
 
+        // Parent Dashboard
         composable(
             route = "parent_dashboard/{parentName}/{childrenNames}/{status}",
             arguments = listOf(
@@ -76,7 +88,6 @@ fun AppNavGraph(navController: NavHostController) {
                 }
             )
         ) { backStackEntry ->
-            // Decode values passed from SignupScreen (kept for logging/safety)
             val parentName = URLDecoder.decode(
                 backStackEntry.arguments?.getString("parentName") ?: "",
                 StandardCharsets.UTF_8.toString()
@@ -94,10 +105,11 @@ fun AppNavGraph(navController: NavHostController) {
 
             ParentDashboardScreen(
                 navController = navController,
-                navBackStackEntry = backStackEntry // <-- CRITICAL: Pass the backStackEntry object
+                navBackStackEntry = backStackEntry
             )
         }
 
+        // Driver Dashboard
         composable("driver_dashboard") { _: NavBackStackEntry ->
             val driverViewModel: DriverDashboardViewModel = hiltViewModel()
             DriverDashboardScreen(
@@ -106,8 +118,38 @@ fun AppNavGraph(navController: NavHostController) {
             )
         }
 
+        // Admin Dashboard
         composable("admin_dashboard") { _: NavBackStackEntry ->
             AdminDashboardScreen(navController = navController)
         }
+
+        // Admin Sign-in (separate screen)
+        composable("admin_signin") { _: NavBackStackEntry ->
+            val signInViewModel: SignInViewModel = hiltViewModel()
+            val signUpViewModel: SignUpViewModel = hiltViewModel()
+            AdminSignInScreen(
+                navController = navController,
+                viewModel = signInViewModel,
+                signUpViewModel = signUpViewModel
+            )
+        }
+
+        // --- Mobile Admin Module Screens ---
+        composable("bus_tracking") { _: NavBackStackEntry ->
+            BusTrackingScreen()
+        }
+        composable("send_notifications") { _: NavBackStackEntry ->
+            SendNotificationsScreen()
+        }
+        composable("profile_edit") { _: NavBackStackEntry ->
+            ProfileEditScreen()
+        }
+        composable("attendance_verification") { _: NavBackStackEntry ->
+            AttendanceVerificationScreen()
+        }
+        composable("driver_communication") { _: NavBackStackEntry ->
+            DriverCommunicationScreen()
+        }
+
     }
-}
+} // End of NavHost

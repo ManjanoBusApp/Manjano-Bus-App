@@ -80,7 +80,6 @@ dependencies {
     implementation("com.google.firebase:firebase-database-ktx")
     implementation("androidx.datastore:datastore-preferences:1.1.0")
     implementation("com.googlecode.libphonenumber:libphonenumber:9.0.21")
-    implementation("androidx.compose.material:material-icons-extended:1.5.0")
     debugImplementation(libs.ui.tooling)
     debugImplementation(libs.ui.test.manifest)
     androidTestImplementation(libs.ui.test.junit4)
@@ -99,8 +98,10 @@ dependencies {
     implementation("com.google.maps.android:maps-compose:4.4.1")
     implementation(libs.play.services.location)
     implementation("com.google.accompanist:accompanist-permissions:0.34.0")
-    implementation(libs.accompanist.permissions)
     implementation(libs.androidx.biometric)
+    implementation("androidx.compose.material3:material3:1.1.0")
+    implementation("androidx.compose.material:material-icons-extended:1.5.0")
+
 }
 
 

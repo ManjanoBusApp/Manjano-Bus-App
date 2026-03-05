@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
+import com.google.firebase.firestore.FirebaseFirestore
 
 
 // ---------------- SignInUiState ----------------
@@ -41,6 +42,7 @@ data class SignInUiState(
     val rememberMe: Boolean = false,
     val sentOtp: String? = null, // For development/testing
     val navigateToDashboard: Boolean = false,
+    val targetDashboardRoute: String? = null,
 
     // Legacy fields for backward compatibility
     val showError: Boolean = false,
@@ -55,6 +57,7 @@ data class SignInUiState(
 // Handles phone input, OTP request/verification, and navigation flow
 class SignInViewModel : ViewModel() {
 
+    private val isDebug = true  // ✅ temporary, for testing admin numbers
     private val _uiState = MutableStateFlow(SignInUiState())
     val uiState: StateFlow<SignInUiState> = _uiState
 
@@ -110,6 +113,15 @@ class SignInViewModel : ViewModel() {
             isPhoneValidationVisible = true,
             showError = !isValid
         )
+    }
+    private fun getTestRole(phone: String): String? {
+        // Normalize phone: remove spaces and ensure full format
+        val normalized = phone.replace(" ", "")
+        return when (normalized) {
+            "+254700123456" -> "school_admin"   // test admin
+            "+254700222222" -> "super_admin"    // test super admin
+            else -> null
+        }
     }
 
     // --- OTP digit updates (manual entry or paste) ---
@@ -318,5 +330,26 @@ class SignInViewModel : ViewModel() {
                 showOtpError = false
             )
         }
+    }
+
+    fun getAdminRoleByMobile(mobile: String, callback: (String?) -> Unit) {
+        val db = FirebaseFirestore.getInstance()
+
+        // Remove spaces before querying Firestore
+        val normalized = mobile.replace(" ", "")
+
+        db.collection("admins")
+            .get()
+            .addOnSuccessListener { documents ->
+                val adminDoc = documents.documents.firstOrNull {
+                    val dbPhone = it.getString("mobileNumber")?.replace(" ", "")
+                    dbPhone == normalized
+                }
+                val role = adminDoc?.getString("role")
+                callback(role)
+            }
+            .addOnFailureListener {
+                callback(null)
+            }
     }
 }

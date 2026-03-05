@@ -120,7 +120,7 @@ fun SignInScreen(
                 navController.navigate("driver_dashboard") {
                     popUpTo("signin/driver") { inclusive = true }
                 }
-            } else {
+            } else if (role == "parent") {
                 val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
                 val parentName = prefs.getString("parent_name", "") ?: ""
                 val childrenNames = prefs.getString("children_names", "") ?: ""
@@ -137,7 +137,6 @@ fun SignInScreen(
             viewModel.onNavigationConsumed()
         }
     }
-
     Scaffold(modifier = Modifier.fillMaxSize()) { paddingValues ->
         Column(
             modifier = Modifier

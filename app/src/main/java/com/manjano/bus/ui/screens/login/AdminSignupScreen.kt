@@ -481,7 +481,10 @@ fun AdminSignupScreen(
                 fontWeight = FontWeight.Bold,
                 textDecoration = TextDecoration.Underline,
                 modifier = Modifier.clickable {
-                    navController.navigate("signin/admin")
+                    navController.navigate("admin_signin") {
+                        // Optional: clear back stack so user can't go back to signup after signin
+                        popUpTo("admin_signup") { inclusive = false }
+                    }
                 }
             )
         }
