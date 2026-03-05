@@ -107,6 +107,10 @@ class SignInViewModel : ViewModel() {
         }
     }
 
+    fun hideSmsMessage() {
+        _uiState.value = _uiState.value.copy(showSmsMessage = false)
+    }
+
     private fun validateAndFormatPhoneNumber(rawInput: String) {
         val countryCode = _uiState.value.selectedCountry.isoCode
         val isValid = PhoneNumberUtils.isValidNumber(rawInput, countryCode)

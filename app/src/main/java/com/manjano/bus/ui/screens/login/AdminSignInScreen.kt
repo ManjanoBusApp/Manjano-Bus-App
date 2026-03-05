@@ -252,13 +252,11 @@ fun AdminSignInScreen(
                 otpErrorMessage = uiState.otpErrorMessage,
                 shouldShakeOtp = uiState.shouldShakeOtp,
                 onOtpChange = { digits ->
+                    viewModel.hideSmsMessage()  // hide SMS prompt immediately
 
                     digits.forEachIndexed { index, digit ->
-
                         viewModel.onOtpDigitChange(index, digit) {
-
                             keyboardController?.hide()
-
                         }
                     }
                 },
@@ -273,8 +271,8 @@ fun AdminSignInScreen(
 
                 Text(
                     text = uiState.otpErrorMessage
-                        ?: "Incorrect code. Please resend the code?",
-                    color = MaterialTheme.colorScheme.error,
+                        ?: "Incorrect code. Send code again",
+                    color = Color.Red,
                     fontSize = 14.sp,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier

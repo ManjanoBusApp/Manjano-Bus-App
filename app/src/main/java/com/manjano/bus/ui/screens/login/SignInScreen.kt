@@ -242,6 +242,9 @@ fun SignInScreen(
                 otpErrorMessage = uiState.otpErrorMessage,
                 shouldShakeOtp = uiState.shouldShakeOtp,
                 onOtpChange = { digits ->
+                    // Hide the "Check SMS" message as soon as user interacts
+                    viewModel.hideSmsMessage()
+
                     digits.forEachIndexed { index, digit ->
                         viewModel.onOtpDigitChange(index, digit) {
                             keyboardController?.hide()
