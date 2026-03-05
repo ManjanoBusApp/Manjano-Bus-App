@@ -299,7 +299,7 @@ fun AdminSignupScreen(
                     // Keyboard will ONLY hide when the logic confirms the number is fully correct
                     if (isValidPhone) {
                         keyboardController?.hide()
-                        focusManager.clearFocus()
+                        otpFocusRequester.requestFocus()
                     }
                 },
                 showError = phoneError,
@@ -370,15 +370,15 @@ fun AdminSignupScreen(
         )
         if (showOtpMessage) {
             Text(
-                text = "Please enter the 4-digits sent to your SMS",
-                color = Color.Black,
+                text = "Check SMS for 4-digit code.",
+                color = Color.Red,
                 fontSize = 14.sp,
                 modifier = Modifier.padding(vertical = 4.dp)
             )
         }
         if (showOtpErrorMessage) {
             Text(
-                text = "Incorrect code. Please press resend code",
+                text = "Incorrect code. Send code again.",
                 color = Color.Red,
                 fontSize = 14.sp,
                 modifier = Modifier.padding(vertical = 4.dp)
