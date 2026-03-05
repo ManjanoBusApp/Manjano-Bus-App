@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import com.google.firebase.firestore.FirebaseFirestore
+import android.util.Log
 
 
 // ---------------- SignInUiState ----------------
@@ -78,17 +79,24 @@ class SignInViewModel : ViewModel() {
             isPhoneValidationVisible = false
         )
 
+
+        // Keep formatted phone for display
         val formatted = PhoneNumberUtils.formatPhoneNumberAsYouType(
             rawDigits = rawInput,
             regionCode = _uiState.value.selectedCountry.isoCode
         )
-
         _uiState.value = _uiState.value.copy(formattedPhone = formatted)
 
-        val isValid = PhoneNumberUtils.isPossibleNumber(
-            rawInput,
-            _uiState.value.selectedCountry.isoCode
-        )
+// Normalize phone for validation & future use
+        var normalized = rawInput.filter { it.isDigit() }
+        if (normalized.startsWith("254")) {
+            normalized = "0" + normalized.substring(3)
+        }
+
+// Validate the normalized number
+        val isValid =
+            PhoneNumberUtils.isPossibleNumber(normalized, _uiState.value.selectedCountry.isoCode)
+        _uiState.value = _uiState.value.copy(isPhoneValid = isValid)
 
         _uiState.value = _uiState.value.copy(isPhoneValid = isValid)
     }
@@ -274,6 +282,10 @@ class SignInViewModel : ViewModel() {
         requestOtp()
     }
 
+    fun setTargetDashboardRoute(route: String) {
+        _uiState.value = _uiState.value.copy(targetDashboardRoute = route)
+    }
+
     // --- Countdown timer for resend ---
     fun startResendTimer() {
         resendTimerJob?.cancel()
@@ -335,20 +347,46 @@ class SignInViewModel : ViewModel() {
     fun getAdminRoleByMobile(mobile: String, callback: (String?) -> Unit) {
         val db = FirebaseFirestore.getInstance()
 
-        // Remove spaces before querying Firestore
-        val normalized = mobile.replace(" ", "")
+        // Step 1: Normalize input number
+        val normalizedInput = mobile.filter { it.isDigit() }
+            .let {
+                when {
+                    it.startsWith("07") -> it             // Already in 07XXXXXXXX
+                    it.startsWith("254") -> "0" + it.substring(3)
+                    it.startsWith("+254") -> "0" + it.substring(4)
+                    else -> it
+                }
+            }
 
+        Log.d("AdminFirestore", "Querying admins collection for normalized phone: $normalizedInput")
+
+        // Step 2: Query Firestore
         db.collection("admins")
             .get()
             .addOnSuccessListener { documents ->
-                val adminDoc = documents.documents.firstOrNull {
-                    val dbPhone = it.getString("mobileNumber")?.replace(" ", "")
-                    dbPhone == normalized
+                Log.d("AdminFirestore", "Firestore success! Found ${documents.size()} documents")
+
+                // Step 3: Compare normalized DB numbers with normalized input
+                val adminDoc = documents.documents.firstOrNull { doc ->
+                    val dbPhoneRaw = doc.getString("mobileNumber") ?: ""
+                    val dbNormalized = dbPhoneRaw.filter { it.isDigit() }
+                        .let {
+                            when {
+                                it.startsWith("07") -> it
+                                it.startsWith("254") -> "0" + it.substring(3)
+                                it.startsWith("+254") -> "0" + it.substring(4)
+                                else -> it
+                            }
+                        }
+                    dbNormalized == normalizedInput
                 }
+
                 val role = adminDoc?.getString("role")
+                Log.d("AdminFirestore", "Admin role found: $role")
                 callback(role)
             }
-            .addOnFailureListener {
+            .addOnFailureListener { e ->
+                Log.e("AdminFirestore", "Firestore query failed: ${e.message}", e)
                 callback(null)
             }
     }

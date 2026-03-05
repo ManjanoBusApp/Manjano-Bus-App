@@ -37,7 +37,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.unit.dp
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-
+import android.util.Log
 @Composable
 fun AdminSignInScreen(
     navController: NavController,
@@ -58,6 +58,7 @@ fun AdminSignInScreen(
 
     var showValidationError by rememberSaveable { mutableStateOf(false) }
     var showPhoneError by rememberSaveable { mutableStateOf(false) }
+    var showUnauthorizedError by remember { mutableStateOf(false) }
 
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -113,21 +114,40 @@ fun AdminSignInScreen(
                     .padding(top = 16.dp, bottom = 24.dp)
             )
 
-            PhoneInputSection(
-                selectedCountry = uiState.selectedCountry,
-                phoneNumber = uiState.rawPhoneInput,
-                onCountrySelected = viewModel::onCountrySelected,
-                onPhoneNumberChange = {
-                    viewModel.onPhoneNumberChange(it)
-                    showPhoneError = false
-                },
-                showError = showPhoneError,
-                onShowErrorChange = { showPhoneError = it },
-                phoneFocusRequester = phoneFocusRequester,
-                keyboardController = keyboardController,
-                focusManager = focusManager
-            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    PhoneInputSection(
+                        selectedCountry = uiState.selectedCountry,
+                        phoneNumber = uiState.rawPhoneInput,
+                        onCountrySelected = viewModel::onCountrySelected,
+                        onPhoneNumberChange = {
+                            viewModel.onPhoneNumberChange(it)
+                            showPhoneError = false
+                            showUnauthorizedError = false
+                        },
+                        showError = showPhoneError,
+                        onShowErrorChange = { showPhoneError = it },
+                        phoneFocusRequester = phoneFocusRequester,
+                        keyboardController = keyboardController,
+                        focusManager = focusManager
+                    )
 
+                    if (showUnauthorizedError) {
+                        Text(
+                            text = "You are not authorized",
+                            color = Color.Red,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .padding(start = 0.dp, top = 2.dp)
+                                .fillMaxWidth(),
+                            textAlign = TextAlign.Start
+                        )
+                    }
+                }
+            }
             val snackbarHostState = remember { SnackbarHostState() }
 
             SnackbarHost(snackbarHostState)
@@ -136,40 +156,79 @@ fun AdminSignInScreen(
                 rememberMe = uiState.rememberMe,
                 isSendingOtp = uiState.isSendingOtp,
                 onRememberMeChange = viewModel::onRememberMeChange,
+
                 onGetCodeClick = {
 
-                    val isValid = PhoneNumberUtils.isValidNumber(
+                    Log.d("AdminSignInDebug", "Get Code button tapped - starting admin check")
+
+                    val isValid = PhoneNumberUtils.isPossibleNumber(
                         uiState.rawPhoneInput,
                         uiState.selectedCountry.isoCode
                     )
 
+                    Log.d(
+                        "AdminSignInDebug",
+                        "Phone validation result: $isValid | raw input: ${uiState.rawPhoneInput} | country code: ${uiState.selectedCountry.isoCode}"
+                    )
+
                     if (!isValid) {
+                        Log.d("AdminSignInDebug", "Validation FAILED - showing phone error")
                         showPhoneError = true
                         phoneFocusRequester.requestFocus()
                     } else {
+
+                        Log.d("AdminSignInDebug", "Validation PASSED - checking admin in Firestore")
 
                         showPhoneError = false
 
                         keyboardController?.hide()
                         focusManager.clearFocus()
 
-                        viewModel.requestOtp()
+                        showUnauthorizedError = false
 
-                        scope.launch {
+                        var normalizedInput = uiState.rawPhoneInput.filter { it.isDigit() }
+                        if (normalizedInput.startsWith("254")) {
+                            normalizedInput = "0" + normalizedInput.substring(3)
+                        }
 
-                            delay(300)
+                        Log.d(
+                            "AdminSignInDebug",
+                            "Normalized phone for Firestore query: $normalizedInput"
+                        )
 
-                            focusManager.clearFocus(force = true)
-                            otpFocusRequester.requestFocus()
+                        // Normalize phone for Firestore query: remove spaces, handle 07XXXXXXX format
+                        normalizedInput = when {
+                            normalizedInput.startsWith("07") -> normalizedInput
+                            normalizedInput.startsWith("254") -> "0" + normalizedInput.substring(3)
+                            else -> normalizedInput
+                        }
 
-                            scrollState.animateScrollTo(scrollState.maxValue)
+                        viewModel.getAdminRoleByMobile(normalizedInput) { role ->
+                            if (role == null) {
+                                // Number not authorized
+                                showUnauthorizedError = true
+                                phoneFocusRequester.requestFocus()
+                            } else {
+                                // Number authorized
+                                showUnauthorizedError = false
+                                viewModel.requestOtp()
 
+                                scope.launch {
+                                    delay(300)
+                                    focusManager.clearFocus(force = true)
+                                    otpFocusRequester.requestFocus()
+                                    scrollState.animateScrollTo(scrollState.maxValue)
+                                }
+
+                                viewModel.setTargetDashboardRoute(
+                                    if (role == "super_admin") "super_admin_dashboard" else "admin_dashboard"
+                                )
+                            }
                         }
                     }
                 },
                 scope = scope
             )
-
             Spacer(modifier = Modifier.height(8.dp))
 
             ResendTimerSection(
