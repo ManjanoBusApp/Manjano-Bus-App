@@ -57,22 +57,25 @@ fun AdminDashboardScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // --- Admin Dashboard Banner ---
-                Box(
+                Card(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(90.dp) // slightly taller
-                        .background(Color(0xFF800080)) // App purple
-                        .padding(top = 30.dp), // adjust vertical spacing
-                    contentAlignment = Alignment.Center
+                        .padding(top = 32.dp)
+                        .height(70.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF800080))
                 ) {
-                    Text(
-                        text = "School Admin Dashboard",
-                        fontSize = 28.sp,
-                        color = Color.White,
-                        fontWeight = FontWeight.Normal, // not bold
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Admin Dashboard",
+                            fontSize = 24.sp,
+                            color = Color.White,
+                            fontWeight = FontWeight.Medium,
+                            textAlign = TextAlign.Center
+                        )
+                    }
                 }
 
                 // --- Dashboard Buttons ---
