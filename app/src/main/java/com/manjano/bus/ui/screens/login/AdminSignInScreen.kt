@@ -137,7 +137,7 @@ fun AdminSignInScreen(
 
                     if (showUnauthorizedError) {
                         Text(
-                            text = "You are not authorized",
+                            text = "Not authorized. Admin access only.",
                             color = Color.Red,
                             fontSize = 14.sp,
                             modifier = Modifier
@@ -240,11 +240,12 @@ fun AdminSignInScreen(
             AnimatedVisibility(visible = uiState.showSmsMessage) {
 
                 Text(
-                    text = "Please check your SMS for the ${Constants.OTP_LENGTH}-digit code",
-                    color = Color.Black,
+                    text = "Check SMS for ${Constants.OTP_LENGTH}-digit code",
+                    color = Color.Red,
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
             }
+
 
             OtpInputRow(
                 otp = uiState.otpDigits,

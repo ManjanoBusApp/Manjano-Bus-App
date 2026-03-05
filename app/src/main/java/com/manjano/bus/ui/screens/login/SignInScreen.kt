@@ -231,8 +231,8 @@ fun SignInScreen(
 
             AnimatedVisibility(visible = uiState.showSmsMessage) {
                 Text(
-                    text = "Please check your SMS for the ${Constants.OTP_LENGTH}-digit code",
-                    color = Color.Black,
+                    text = "Check SMS for ${Constants.OTP_LENGTH}-digit code",
+                    color = Color.Red,
                     modifier = Modifier.padding(vertical = 4.dp)
                 )
             }
@@ -258,8 +258,8 @@ fun SignInScreen(
 
             AnimatedVisibility(visible = uiState.showOtpError) {
                 Text(
-                    text = uiState.otpErrorMessage ?: "Incorrect code. Please resend the code?",
-                    color = MaterialTheme.colorScheme.error,
+                    text = uiState.otpErrorMessage ?: "Incorrect code. Send code again.",
+                    color = Color.Red,
                     fontSize = 14.sp,
                     style = MaterialTheme.typography.bodySmall,
                     modifier = Modifier
