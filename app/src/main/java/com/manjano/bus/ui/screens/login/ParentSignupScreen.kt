@@ -259,6 +259,7 @@ fun SignupScreen(
                 parentName = newValue.copy(
                     text = newValue.text.filter { it.isLetter() || it.isWhitespace() }
                 )
+                parentError = false
             },
             placeholder = { Text("Parent's Full Name") },
             keyboardOptions = KeyboardOptions(
@@ -341,6 +342,10 @@ fun SignupScreen(
                                     val updatedTouched = hasTouchedChild.toMutableList()
                                     updatedTouched[index] = true
                                     hasTouchedChild = updatedTouched
+
+                                    val updatedErrors = childErrors.toMutableList()
+                                    updatedErrors[index] = false
+                                    childErrors = updatedErrors
                                 }
 
                                 if (!focusState.isFocused && hasTouchedChild[index]) {
@@ -475,6 +480,7 @@ fun SignupScreen(
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) {
                         hasTouchedPhone = true
+                        phoneError = false
                     } else if (hasTouchedPhone) {
                         val isValidPhone = try {
                             PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
