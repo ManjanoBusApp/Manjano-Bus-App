@@ -286,69 +286,71 @@ fun AdminSignInScreen(
             val continueShakeOffset = remember { mutableFloatStateOf(0f) }
             val haptic = LocalHapticFeedback.current
 
+            var isPhoneAuthorized by remember { mutableStateOf(false) }
+
+            LaunchedEffect(uiState.rawPhoneInput) {
+                val normalizedInput = uiState.rawPhoneInput.filter { it.isDigit() }.let {
+                    when {
+                        it.startsWith("07") -> it
+                        it.startsWith("254") -> "0" + it.substring(3)
+                        else -> it
+                    }
+                }
+
+                if (normalizedInput.length == 10) {
+                    viewModel.getAdminRoleByMobile(normalizedInput) { role ->
+                        isPhoneAuthorized = role != null
+                        showUnauthorizedError = role == null
+                    }
+                } else {
+                    isPhoneAuthorized = false
+                    showUnauthorizedError = false
+                }
+            }
+
             val isPhoneValid = try {
-
-                val proto = PhoneNumberUtil
-                    .getInstance()
-                    .parse(
-                        uiState.rawPhoneInput,
-                        uiState.selectedCountry.isoCode
-                    )
-
-                PhoneNumberUtil
-                    .getInstance()
-                    .isValidNumberForRegion(
-                        proto,
-                        uiState.selectedCountry.isoCode
-                    )
-
+                val proto = PhoneNumberUtil.getInstance().parse(
+                    uiState.rawPhoneInput,
+                    uiState.selectedCountry.isoCode
+                )
+                PhoneNumberUtil.getInstance().isValidNumberForRegion(
+                    proto,
+                    uiState.selectedCountry.isoCode
+                )
             } catch (e: Exception) {
-
                 false
-
             }
 
             val isOtpComplete = uiState.otpDigits.all { it.isNotEmpty() }
 
             Button(
                 onClick = {
-
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-
                     keyboardController?.hide()
-
                     focusManager.clearFocus()
-
                     showValidationError = false
 
                     val enteredOtp = uiState.otpDigits.joinToString("")
-
                     viewModel.updateOtpDigits(enteredOtp)
-
                     viewModel.verifyOtp()
 
                     scope.launch {
-
                         repeat(2) {
-
                             continueShakeOffset.floatValue = 4f
                             delay(40)
-
                             continueShakeOffset.floatValue = -4f
                             delay(40)
-
                         }
-
                         continueShakeOffset.floatValue = 0f
-
                     }
                 },
                 enabled = isPhoneValid &&
+                        isPhoneAuthorized &&
                         isOtpComplete &&
                         !uiState.isOtpSubmitting,
                 colors = ButtonDefaults.buttonColors(
                     containerColor =
-                        if (isPhoneValid && isOtpComplete)
+                        if (isPhoneValid && isPhoneAuthorized && isOtpComplete)
                             Color(0xFF800080)
                         else
                             Color.LightGray,
@@ -359,7 +361,6 @@ fun AdminSignInScreen(
                     .height(56.dp)
                     .offset(x = continueShakeOffset.floatValue.dp)
             ) {
-
                 Text(
                     text = "Continue",
                     color = Color.White,

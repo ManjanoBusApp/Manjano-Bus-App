@@ -143,7 +143,6 @@ fun DriverSignupScreen(
                 .padding(top = 16.dp, bottom = 24.dp)
         )
 
-        // Driver Name
         OutlinedTextField(
             value = driverName,
             onValueChange = { newValue ->
@@ -170,7 +169,6 @@ fun DriverSignupScreen(
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) {
                         driverTouched = true
-                        driverError = false
                     } else if (!focusState.isFocused && driverTouched && driverName.text.isEmpty()) {
                         driverError = true
                     }
@@ -358,17 +356,20 @@ fun DriverSignupScreen(
             onGetCodeClick = {
                 keyboardController?.hide()
 
-                // Validate all fields ONCE when Send Code is clicked
-                driverError = driverName.text.isEmpty()
-                idError = idNumber.text.isEmpty()
-                schoolError = schoolName.text.isEmpty()
+                driverTouched = true
+                idTouched = true
+                schoolTouched = true
+                phoneTouched = true
 
+                driverError = driverName.text.isBlank()
+                idError = idNumber.text.isBlank()
+                schoolError = schoolName.text.isBlank()
                 val isValidPhone = try {
                     PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
                 } catch (e: Exception) {
                     false
                 }
-                phoneError = phoneNumber.isEmpty() || !isValidPhone
+                phoneError = phoneNumber.isBlank() || !isValidPhone
 
                 if (!driverError && !idError && !schoolError && !phoneError) {
                     signupViewModel.requestOtp()
@@ -381,7 +382,7 @@ fun DriverSignupScreen(
                         }
                     }
                 } else {
-                    // Focus the first field with an error
+                    // Jump cursor to first empty field
                     when {
                         driverError -> driverFocusRequester.requestFocus()
                         idError -> idFocusRequester.requestFocus()

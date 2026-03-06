@@ -427,12 +427,12 @@ fun SignupScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Email
-        // Email
         OutlinedTextField(
             value = email,
             onValueChange = {
                 hasTouchedEmail = true
                 email = it
+                emailError = false // hide error as soon as user types
             },
             placeholder = { Text("name@email.com") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
@@ -443,8 +443,8 @@ fun SignupScreen(
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) {
                         hasTouchedEmail = true
-                    }
-                    if (!focusState.isFocused && hasTouchedEmail) {
+                        emailError = false
+                    } else if (hasTouchedEmail) {
                         emailError =
                             email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
                                 .matches()
@@ -454,7 +454,7 @@ fun SignupScreen(
             shape = RoundedCornerShape(12.dp),
             isError = emailError
         )
-        if (emailError && hasTouchedEmail) Text(
+        if (emailError) Text(
             "Please enter a valid email address",
             color = Color.Red,
             fontSize = 12.sp
