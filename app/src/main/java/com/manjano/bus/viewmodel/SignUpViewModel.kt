@@ -33,7 +33,8 @@ data class SignUpUiState(
     val navigateToDashboard: Boolean = false,
     val rememberMe: Boolean = false,
     val parentName: String = "",
-    val childrenNames: String = ""
+    val childrenNames: String = "",
+    val showSmsMessage: Boolean = false
 )
 
 class SignUpViewModel : ViewModel() {
@@ -78,6 +79,14 @@ class SignUpViewModel : ViewModel() {
     }
     fun setOtpValid(valid: Boolean) {
         _isOtpValid.value = valid
+    }
+
+    fun showSmsMessage() {
+        _uiState.value = _uiState.value.copy(showSmsMessage = true)
+    }
+
+    fun hideSmsMessage() {
+        _uiState.value = _uiState.value.copy(showSmsMessage = false)
     }
 
     fun requestOtp() {

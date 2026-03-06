@@ -44,6 +44,13 @@ import kotlinx.coroutines.launch
 import kotlin.ranges.coerceIn
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.focus.FocusManager
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -82,6 +89,7 @@ fun AdminSignupScreen(
     var showOtpMessage by remember { mutableStateOf(false) }
     var showOtpErrorMessage by remember { mutableStateOf(false) }
     var showUnauthorizedError by remember { mutableStateOf(false) }
+    var phoneChangeTrigger by remember { mutableIntStateOf(0) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
@@ -132,7 +140,7 @@ fun AdminSignupScreen(
         OutlinedTextField(
             value = adminName,
             onValueChange = { newValue ->
-                val filtered = newValue.text.filter { ch -> ch.isLetter() || ch.isWhitespace() }
+                val filtered = newValue.text.filter { it.isLetter() || it.isWhitespace() }
                 adminName = TextFieldValue(
                     text = filtered,
                     selection = TextRange(
@@ -140,6 +148,9 @@ fun AdminSignupScreen(
                         end = newValue.selection.end.coerceIn(0, filtered.length)
                     )
                 )
+
+                // Only hide error if the user types at least one character
+                if (filtered.isNotEmpty()) adminError = false
             },
             placeholder = { Text("Your Full Name") },
             keyboardOptions = KeyboardOptions(
@@ -151,9 +162,7 @@ fun AdminSignupScreen(
                 .fillMaxWidth()
                 .focusRequester(adminFocusRequester)
                 .onFocusChanged { focusState ->
-                    if (focusState.isFocused) {
-                        adminError = false
-                    }
+                    if (focusState.isFocused && adminName.text.isNotEmpty()) adminError = false
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
@@ -163,11 +172,11 @@ fun AdminSignupScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // ID Number
+// ID Number
         OutlinedTextField(
             value = idNumber,
             onValueChange = { newValue ->
-                val filtered = newValue.text.filter { ch -> ch.isDigit() }
+                val filtered = newValue.text.filter { it.isDigit() }
                 idNumber = TextFieldValue(
                     text = filtered,
                     selection = TextRange(
@@ -175,33 +184,30 @@ fun AdminSignupScreen(
                         end = newValue.selection.end.coerceIn(0, filtered.length)
                     )
                 )
+                idError = false // hide error as soon as user types
             },
             placeholder = { Text("ID Number") },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Number
-            ),
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(idFocusRequester)
                 .onFocusChanged { focusState ->
-                    if (focusState.isFocused) {
-                        idError = false
-                    }
+                    if (focusState.isFocused) idError = false
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
             isError = idError
         )
-        if (idError) Text("Please Enter Your ID Number", color = Color.Red, fontSize = 12.sp)
+        if (idError) Text("Please fill ID number", color = Color.Red, fontSize = 12.sp)
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // School Name
+// School Name
         OutlinedTextField(
             value = schoolName,
             onValueChange = { newValue ->
-                val filtered = newValue.text.filter { ch -> ch.isLetter() || ch.isWhitespace() }
+                val filtered = newValue.text.filter { it.isLetter() || it.isWhitespace() }
                 schoolName = TextFieldValue(
                     text = filtered,
                     selection = TextRange(
@@ -209,6 +215,7 @@ fun AdminSignupScreen(
                         end = newValue.selection.end.coerceIn(0, filtered.length)
                     )
                 )
+                schoolError = false // hide error as soon as user types
             },
             placeholder = { Text("School Name") },
             keyboardOptions = KeyboardOptions(
@@ -220,23 +227,21 @@ fun AdminSignupScreen(
                 .fillMaxWidth()
                 .focusRequester(schoolFocusRequester)
                 .onFocusChanged { focusState ->
-                    if (focusState.isFocused) {
-                        schoolError = false
-                    }
+                    if (focusState.isFocused) schoolError = false
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
             isError = schoolError
         )
-        if (schoolError) Text("Please Enter the School Name", color = Color.Red, fontSize = 12.sp)
+        if (schoolError) Text("Please fill your school name", color = Color.Red, fontSize = 12.sp)
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        // Current Position
+// Current Position
         OutlinedTextField(
             value = currentPosition,
             onValueChange = { newValue ->
-                val filtered = newValue.text.filter { ch -> ch.isLetter() || ch.isWhitespace() }
+                val filtered = newValue.text.filter { it.isLetter() || it.isWhitespace() }
                 currentPosition = TextFieldValue(
                     text = filtered,
                     selection = TextRange(
@@ -244,6 +249,7 @@ fun AdminSignupScreen(
                         end = newValue.selection.end.coerceIn(0, filtered.length)
                     )
                 )
+                positionError = false // hide error as soon as user types
             },
             placeholder = { Text("Current Position") },
             keyboardOptions = KeyboardOptions(
@@ -255,15 +261,17 @@ fun AdminSignupScreen(
                 .fillMaxWidth()
                 .focusRequester(positionFocusRequester)
                 .onFocusChanged { focusState ->
-                    if (focusState.isFocused) {
-                        positionError = false
-                    }
+                    if (focusState.isFocused) positionError = false
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
             isError = positionError
         )
-        if (positionError) Text("Please fill this section", color = Color.Red, fontSize = 12.sp)
+        if (positionError) Text(
+            "Please fill your current position",
+            color = Color.Red,
+            fontSize = 12.sp
+        )
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -284,6 +292,7 @@ fun AdminSignupScreen(
                     phoneNumber = it
                     phoneError = false
                     showUnauthorizedError = false
+                    phoneChangeTrigger += 1   // forces recomposition
                 },
                 showError = phoneError,
                 onShowErrorChange = { phoneError = it },
@@ -291,19 +300,21 @@ fun AdminSignupScreen(
                 keyboardController = keyboardController,
                 focusManager = focusManager
             )
-
-            if (showUnauthorizedError) {
-                Text(
-                    text = "Not authorized. Admin access only.",
-                    color = Color.Red,
-                    fontSize = 14.sp,
-                    modifier = Modifier
-                        .padding(top = 4.dp)
-                        .fillMaxWidth(),
-                    textAlign = TextAlign.Start
-                )
-            }
         }
+
+// Move "Not authorized..." message below the Box
+        if (showUnauthorizedError) {
+            Text(
+                text = "Not authorized. Admin access only.",
+                color = Color.Red,
+                fontSize = 14.sp,
+                modifier = Modifier
+                    .padding(top = 4.dp, start = 4.dp)
+                    .fillMaxWidth(),
+                textAlign = TextAlign.Start
+            )
+        }
+
         Spacer(modifier = Modifier.height(16.dp))
 
         SnackbarHost(
@@ -325,24 +336,24 @@ fun AdminSignupScreen(
                     keyboardController?.hide()
                     focusManager.clearFocus()
 
-                    // Validate all fields once
+                    // Reset all errors first
                     adminError = adminName.text.isEmpty()
                     idError = idNumber.text.isEmpty()
                     schoolError = schoolName.text.isEmpty()
                     positionError = currentPosition.text.isEmpty()
                     phoneError = phoneNumber.isEmpty()
 
-                    if (adminError || idError || schoolError || positionError || phoneError) {
-                        // Focus first field with error
-                        when {
-                            adminError -> adminFocusRequester.requestFocus()
-                            idError -> idFocusRequester.requestFocus()
-                            schoolError -> schoolFocusRequester.requestFocus()
-                            positionError -> positionFocusRequester.requestFocus()
-                            phoneError -> phoneFocusRequester.requestFocus()
-                        }
-                        return@run // ✅ exits this run block without error
+                    // Focus the first field with an error (if any)
+                    when {
+                        adminError -> adminFocusRequester.requestFocus()
+                        idError -> idFocusRequester.requestFocus()
+                        schoolError -> schoolFocusRequester.requestFocus()
+                        positionError -> positionFocusRequester.requestFocus()
+                        phoneError -> phoneFocusRequester.requestFocus()
                     }
+
+                    // Stop here if any errors
+                    if (adminError || idError || schoolError || positionError || phoneError) return@run
 
                     // Normalize phone number
                     var normalizedPhone = phoneNumber.filter { it.isDigit() }
@@ -357,12 +368,14 @@ fun AdminSignupScreen(
                             phoneFocusRequester.requestFocus()
                         } else {
                             showUnauthorizedError = false
-                            signupViewModel.requestOtp()
+                            signupViewModel.hideSmsMessage() // hide previous SMS prompt
+                            signupViewModel.requestOtp()      // request OTP
 
                             scope.launch {
                                 delay(300)
                                 otpFocusRequester.requestFocus()
                                 scrollState.animateScrollTo(scrollState.maxValue)
+                                signupViewModel.showSmsMessage() // trigger SMS visibility
                             }
                         }
                     }
@@ -374,9 +387,13 @@ fun AdminSignupScreen(
             canResend = uiState.canResendOtp,
             onResendClick = { signupViewModel.resendOtp() }
         )
-        if (showOtpMessage) {
+        // Collect uiState in composable
+        val uiState by signupViewModel.uiState.collectAsState()
+
+// Show SMS message only if uiState.showSmsMessage is true
+        AnimatedVisibility(visible = uiState.showSmsMessage) {
             Text(
-                text = "Check SMS for 4-digit code.",
+                text = "Check SMS for ${Constants.OTP_LENGTH}-digit code",
                 color = Color.Red,
                 fontSize = 14.sp,
                 modifier = Modifier.padding(vertical = 4.dp)
@@ -396,18 +413,30 @@ fun AdminSignupScreen(
             otpErrorMessage = uiState.otpErrorMessage,
             shouldShakeOtp = uiState.shouldShakeOtp,
             onOtpChange = { digits: List<String> ->
-                showOtpMessage = false
+                signupViewModel.hideSmsMessage() // hide SMS prompt immediately when typing
+
                 digits.forEachIndexed { index, digit ->
                     signupViewModel.onOtpDigitChange(index, digit)
                 }
+
                 if (digits.all { it.isNotEmpty() }) {
                     val enteredOtp = digits.joinToString("")
                     if (enteredOtp == Constants.TEST_OTP) {
                         keyboardController?.hide()
                         signupViewModel.setOtpValid(true)
+                        showOtpErrorMessage = false
                     } else {
                         signupViewModel.setOtpValid(false)
                         showOtpErrorMessage = true
+                        scope.launch {
+                            delay(1000)
+                            repeat(Constants.OTP_LENGTH) { idx ->
+                                signupViewModel.onOtpDigitChange(idx, "")
+                            }
+                            focusManager.clearFocus()
+                            delay(50)
+                            otpFocusRequester.requestFocus()
+                        }
                     }
                 } else {
                     showOtpErrorMessage = false
@@ -426,6 +455,49 @@ fun AdminSignupScreen(
         val isOtpValid by signupViewModel.isOtpValid.collectAsState()
         val continueShakeOffset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
 
+        var isPhoneAuthorized by remember { mutableStateOf(false) }
+
+        val normalizedPhone by remember(phoneNumber) {
+            derivedStateOf {
+                phoneNumber.filter { it.isDigit() }
+            }
+        }
+
+        LaunchedEffect(normalizedPhone) {
+            if (normalizedPhone.length == 10) {
+                signupViewModel.getAdminRoleByMobile(normalizedPhone) { role ->
+                    isPhoneAuthorized = role != null
+                    showUnauthorizedError = role == null
+                }
+            } else {
+                isPhoneAuthorized = false
+                showUnauthorizedError = false
+            }
+        }
+
+        val isContinueEnabled by remember(
+            adminName.text,
+            idNumber.text,
+            schoolName.text,
+            currentPosition.text,
+            normalizedPhone,
+            isPhoneAuthorized,
+            showOtpErrorMessage,
+            uiState.otpDigits
+        ) {
+            derivedStateOf {
+                adminName.text.isNotBlank() &&
+                        idNumber.text.isNotBlank() &&
+                        schoolName.text.isNotBlank() &&
+                        currentPosition.text.isNotBlank() &&
+                        normalizedPhone.length == 10 &&
+                        isPhoneAuthorized &&
+                        !showOtpErrorMessage &&
+                        uiState.otpDigits.size == Constants.OTP_LENGTH &&
+                        uiState.otpDigits.all { it.isNotBlank() } &&
+                        uiState.otpDigits.joinToString("") == Constants.TEST_OTP
+            }
+        }
         Button(
             onClick = {
                 scope.launch {
@@ -437,38 +509,25 @@ fun AdminSignupScreen(
                     }
                     continueShakeOffset.floatValue = 0f
                 }
-
-                adminError = adminName.text.isEmpty()
-                idError = idNumber.text.isEmpty()
-                schoolError = schoolName.text.isEmpty()
-                positionError = currentPosition.text.isEmpty()
-                phoneError = phoneNumber.isEmpty()
-
-                if (!adminError && !idError && !schoolError && !positionError && !phoneError && uiState.otpDigits.joinToString(
-                        ""
-                    ) == Constants.TEST_OTP
-                ) {
+                // All navigation safety checks are already handled reactively by isContinueEnabled
+                if (isContinueEnabled) {
                     navController.navigate("admin_dashboard") {
                         popUpTo("admin_signup") { inclusive = true }
                     }
                 }
             },
-            enabled = adminName.text.isNotEmpty() &&
-                    idNumber.text.isNotEmpty() &&
-                    schoolName.text.isNotEmpty() &&
-                    currentPosition.text.isNotEmpty() &&
-                    phoneNumber.isNotEmpty() &&
-                    uiState.otpDigits.joinToString("") == Constants.TEST_OTP,
+            enabled = isContinueEnabled,
             modifier = Modifier
                 .fillMaxWidth()
                 .offset(x = continueShakeOffset.floatValue.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = appPurple,
-                disabledContainerColor = appPurple.copy(alpha = 0.5f)
+                disabledContainerColor = Color.LightGray
             )
         ) {
             Text("Continue", color = Color.White, fontSize = 16.sp)
         }
+
         Spacer(modifier = Modifier.height(12.dp))
 
         Row(
