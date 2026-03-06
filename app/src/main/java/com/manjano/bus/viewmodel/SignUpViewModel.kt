@@ -15,6 +15,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlin.math.min
+import com.google.firebase.firestore.FirebaseFirestore
+
 
 private fun sanitizeKey(name: String): String =
     name.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
@@ -110,6 +112,44 @@ class SignUpViewModel : ViewModel() {
         requestOtp()
     }
 
+    fun getAdminRoleByMobile(mobile: String, callback: (String?) -> Unit) {
+        val db = FirebaseFirestore.getInstance()
+
+        val normalizedInput = mobile.filter { it.isDigit() }
+            .let {
+                when {
+                    it.startsWith("07") -> it
+                    it.startsWith("254") -> "0" + it.substring(3)
+                    it.startsWith("+254") -> "0" + it.substring(4)
+                    else -> it
+                }
+            }
+
+        db.collection("admins")
+            .get()
+            .addOnSuccessListener { documents ->
+
+                val adminDoc = documents.documents.firstOrNull { doc ->
+                    val dbPhoneRaw = doc.getString("mobileNumber") ?: ""
+                    val dbNormalized = dbPhoneRaw.filter { it.isDigit() }
+                        .let {
+                            when {
+                                it.startsWith("07") -> it
+                                it.startsWith("254") -> "0" + it.substring(3)
+                                it.startsWith("+254") -> "0" + it.substring(4)
+                                else -> it
+                            }
+                        }
+                    dbNormalized == normalizedInput
+                }
+
+                val role = adminDoc?.getString("role")
+                callback(role)
+            }
+            .addOnFailureListener {
+                callback(null)
+            }
+    }
     fun onOtpDigitChange(index: Int, digit: String) {
         val digits = _uiState.value.otpDigits.toMutableList().apply {
             this[index] = digit.take(1)
@@ -174,6 +214,7 @@ class SignUpViewModel : ViewModel() {
 
         Log.d("🔥", "🔍 Running Firebase connection test before saving...")
         testFirebaseConnection()
+
 
         // Helper to normalize names for matching
         fun normalizeName(name: String): String =

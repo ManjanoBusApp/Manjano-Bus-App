@@ -81,6 +81,7 @@ fun AdminSignupScreen(
     var phoneNumber by remember { mutableStateOf("") }
     var showOtpMessage by remember { mutableStateOf(false) }
     var showOtpErrorMessage by remember { mutableStateOf(false) }
+    var showUnauthorizedError by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
@@ -273,13 +274,7 @@ fun AdminSignupScreen(
                 .focusRequester(dummyFocusRequester)
         )
 
-        // Phone input
-        // 1. Ensure these are defined at the TOP of your Screen Composable
-        val keyboardController =
-            androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
-
-        // 2. Pass them into the function below
+        // Phone input with admin verification
         Box(modifier = Modifier.fillMaxWidth()) {
             PhoneInputSection(
                 selectedCountry = selectedCountry,
@@ -287,20 +282,8 @@ fun AdminSignupScreen(
                 onCountrySelected = { selectedCountry = it },
                 onPhoneNumberChange = {
                     phoneNumber = it
-                    // Disable real-time error reporting while typing
                     phoneError = false
-
-                    val isValidPhone = try {
-                        PhoneNumberUtils.isValidNumber(it, selectedCountry.isoCode)
-                    } catch (e: Exception) {
-                        false
-                    }
-
-                    // Keyboard will ONLY hide when the logic confirms the number is fully correct
-                    if (isValidPhone) {
-                        keyboardController?.hide()
-                        otpFocusRequester.requestFocus()
-                    }
+                    showUnauthorizedError = false
                 },
                 showError = phoneError,
                 onShowErrorChange = { phoneError = it },
@@ -308,8 +291,19 @@ fun AdminSignupScreen(
                 keyboardController = keyboardController,
                 focusManager = focusManager
             )
-        }
 
+            if (showUnauthorizedError) {
+                Text(
+                    text = "Not authorized. Admin access only.",
+                    color = Color.Red,
+                    fontSize = 14.sp,
+                    modifier = Modifier
+                        .padding(top = 4.dp)
+                        .fillMaxWidth(),
+                    textAlign = TextAlign.Start
+                )
+            }
+        }
         Spacer(modifier = Modifier.height(16.dp))
 
         SnackbarHost(
@@ -327,38 +321,50 @@ fun AdminSignupScreen(
             isSendingOtp = uiState.isSendingOtp,
             onRememberMeChange = signupViewModel::onRememberMeChange,
             onGetCodeClick = {
-                keyboardController?.hide()
+                run {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
 
-                // Validate all fields ONCE when Send Code is clicked
-                adminError = adminName.text.isEmpty()
-                idError = idNumber.text.isEmpty()
-                schoolError = schoolName.text.isEmpty()
-                positionError = currentPosition.text.isEmpty()
-                val isValidPhone = try {
-                    PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
-                } catch (e: Exception) {
-                    false
-                }
-                phoneError = phoneNumber.isEmpty() || !isValidPhone
+                    // Validate all fields once
+                    adminError = adminName.text.isEmpty()
+                    idError = idNumber.text.isEmpty()
+                    schoolError = schoolName.text.isEmpty()
+                    positionError = currentPosition.text.isEmpty()
+                    phoneError = phoneNumber.isEmpty()
 
-                if (!adminError && !idError && !schoolError && !positionError && !phoneError) {
-                    signupViewModel.requestOtp()
-                    showOtpMessage = true
-                    scope.launch {
-                        delay(100)
-                        if (scrollState.maxValue > 0) {
-                            otpFocusRequester.requestFocus()
-                            scrollState.animateScrollTo(scrollState.maxValue)
+                    if (adminError || idError || schoolError || positionError || phoneError) {
+                        // Focus first field with error
+                        when {
+                            adminError -> adminFocusRequester.requestFocus()
+                            idError -> idFocusRequester.requestFocus()
+                            schoolError -> schoolFocusRequester.requestFocus()
+                            positionError -> positionFocusRequester.requestFocus()
+                            phoneError -> phoneFocusRequester.requestFocus()
                         }
+                        return@run // ✅ exits this run block without error
                     }
-                } else {
-                    // Focus the first field with an error
-                    when {
-                        adminError -> adminFocusRequester.requestFocus()
-                        idError -> idFocusRequester.requestFocus()
-                        schoolError -> schoolFocusRequester.requestFocus()
-                        positionError -> positionFocusRequester.requestFocus()
-                        phoneError -> phoneFocusRequester.requestFocus()
+
+                    // Normalize phone number
+                    var normalizedPhone = phoneNumber.filter { it.isDigit() }
+                    if (normalizedPhone.startsWith("254")) {
+                        normalizedPhone = "0" + normalizedPhone.substring(3)
+                    }
+
+                    // Check Firestore for admin role
+                    signupViewModel.getAdminRoleByMobile(normalizedPhone) { role: String? ->
+                        if (role == null) {
+                            showUnauthorizedError = true
+                            phoneFocusRequester.requestFocus()
+                        } else {
+                            showUnauthorizedError = false
+                            signupViewModel.requestOtp()
+
+                            scope.launch {
+                                delay(300)
+                                otpFocusRequester.requestFocus()
+                                scrollState.animateScrollTo(scrollState.maxValue)
+                            }
+                        }
                     }
                 }
             },
