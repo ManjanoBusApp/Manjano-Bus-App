@@ -62,6 +62,111 @@ class SignInViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(SignInUiState())
     val uiState: StateFlow<SignInUiState> = _uiState
 
+    // ============ Phone number existence check for sign-in ============
+    private val _isPhoneAllowed = MutableStateFlow<Boolean?>(null) // null = not checked yet
+    val isPhoneAllowed: StateFlow<Boolean?> = _isPhoneAllowed
+
+    fun checkPhoneNumberInFirestore(phone: String, countryIso: String) {
+        val db = FirebaseFirestore.getInstance()
+
+        val normalizedInput = normalizePhoneNumber(phone, countryIso)
+        val inputDigits = normalizedInput.filter { it.isDigit() }  // pure digits
+
+        db.collection("parents")
+            .get()
+            .addOnSuccessListener { documents ->
+                val matched = documents.documents.any { doc ->
+                    val dbNumber = doc.getString("mobileNumber") ?: ""
+
+                    if (countryIso.equals("KE", ignoreCase = true)) {
+                        // Kenyan: keep the working digits-only + leading zero logic
+                        val dbDigits = dbNumber.filter { it.isDigit() }
+                        val dbNormalized = when {
+                            dbDigits.length == 9 -> "0$dbDigits"
+                            dbDigits.length == 10 -> if (dbDigits.startsWith("0") || dbDigits.startsWith(
+                                    "011"
+                                )
+                            ) dbDigits else "0$dbDigits"
+
+                            else -> dbDigits
+                        }
+
+                        val inputNormalized = when {
+                            inputDigits.length == 9 -> "0$inputDigits"
+                            inputDigits.length == 10 -> inputDigits
+                            else -> inputDigits
+                        }
+
+                        dbNormalized == inputNormalized
+                    } else {
+                        // INTERNATIONAL – exact copy from working SignUpViewModel
+                        val dbClean = dbNumber.replace("[^+0-9]".toRegex(), "")
+                        val inputClean = phone.replace("[^+0-9]".toRegex(), "")
+
+                        val callingCode = CountryRepository.countries
+                            .find { it.isoCode.equals(countryIso, ignoreCase = true) }
+                            ?.callingCode
+                            ?.replace("[^+0-9]".toRegex(), "") ?: ""
+
+                        val expectedE164 = when {
+                            inputClean.startsWith("+") -> inputClean
+                            inputClean.startsWith("00") -> "+" + inputClean.drop(2)
+                            inputClean.startsWith("0") -> "+$callingCode${inputClean.drop(1)}"
+                            else -> "+$callingCode$inputClean"
+                        }
+
+                        dbClean == expectedE164
+                    }
+                }
+
+                _isPhoneAllowed.value = matched
+
+                Log.d(
+                    "PhoneCheck",
+                    "Input: $phone | Normalized: $normalizedInput | Digits: $inputDigits"
+                )
+                Log.d("PhoneCheck", "Found match: $matched | Docs scanned: ${documents.size()}")
+            }
+            .addOnFailureListener { e ->
+                Log.e("PhoneCheck", "Firestore failed: ${e.message}", e)
+                _isPhoneAllowed.value = false
+            }
+    }
+
+    fun resetPhoneAllowed() {
+        _isPhoneAllowed.value = null
+    }
+
+    // Reuse or copy the normalizePhoneNumber function from SignUpViewModel
+    fun normalizePhoneNumber(rawNumber: String, countryIso: String): String {
+        val digitsOnly = rawNumber.filter { it.isDigit() }
+        val result = if (countryIso.equals("KE", ignoreCase = true)) {
+            when {
+                digitsOnly.length == 9 -> "0$digitsOnly"
+                digitsOnly.length == 10 -> digitsOnly
+                digitsOnly.startsWith("254") && digitsOnly.length == 12 -> "0" + digitsOnly.substring(
+                    3
+                )
+
+                digitsOnly.startsWith("+254") && digitsOnly.length == 13 -> "0" + digitsOnly.substring(
+                    4
+                )
+
+                else -> digitsOnly  // fallback to digits only
+            }
+        } else {
+            val countryCode = CountryRepository.countries
+                .find { it.isoCode.equals(countryIso, ignoreCase = true) }?.callingCode ?: ""
+            when {
+                rawNumber.startsWith("+") -> rawNumber
+                digitsOnly.startsWith("0") -> "+$countryCode" + digitsOnly.drop(1)
+                else -> "+$countryCode$digitsOnly"
+            }
+        }
+
+        Log.d("PhoneNormalize", "Input: $rawNumber ($countryIso) → Normalized: $result")
+        return result
+    }
     private var resendTimerJob: Job? = null
     private var autoSubmitJob: Job? = null
 

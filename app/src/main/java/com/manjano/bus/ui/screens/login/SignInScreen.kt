@@ -110,9 +110,13 @@ fun SignInScreen(
     var showValidationError by rememberSaveable { mutableStateOf(false) }
     var showPhoneError by rememberSaveable { mutableStateOf(false) }
     val phoneFocusRequester = remember { FocusRequester() }
-    val context = androidx.compose.ui.platform.LocalContext.current // Add context here
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val signUpUiState by signUpViewModel.uiState.collectAsStateWithLifecycle()
+
+    // NEW: Firestore phone existence states (mirroring signup)
+    val isPhoneAllowed by viewModel.isPhoneAllowed.collectAsStateWithLifecycle()
+    var phoneErrorText by remember { mutableStateOf("") }
 
     LaunchedEffect(uiState.navigateToDashboard) {
         if (uiState.navigateToDashboard) {
@@ -172,20 +176,56 @@ fun SignInScreen(
                     .padding(top = 16.dp, bottom = 24.dp)
             )
 
-            PhoneInputSection(
-                selectedCountry = uiState.selectedCountry,
-                phoneNumber = uiState.rawPhoneInput,
-                onCountrySelected = viewModel::onCountrySelected,
-                onPhoneNumberChange = {
-                    viewModel.onPhoneNumberChange(it)
-                    showPhoneError = false
-                },
-                showError = showPhoneError,
-                onShowErrorChange = { showPhoneError = it },
-                phoneFocusRequester = phoneFocusRequester,
-                keyboardController = keyboardController,
-                focusManager = focusManager
-            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused) {
+                            phoneErrorText = ""
+                            // Optional: reset allowed state if you want fresh check on re-focus
+                            // viewModel.resetPhoneAllowed()
+                        }
+                    }
+            ) {
+                PhoneInputSection(
+                    selectedCountry = uiState.selectedCountry,
+                    phoneNumber = uiState.rawPhoneInput,
+                    onCountrySelected = viewModel::onCountrySelected,
+                    onPhoneNumberChange = {
+                        viewModel.onPhoneNumberChange(it)
+                        showPhoneError = false
+                        phoneErrorText = ""  // Clear error on typing
+                    },
+                    showError = false,
+                    onShowErrorChange = { /* ignore */ },
+                    phoneFocusRequester = phoneFocusRequester,
+                    keyboardController = keyboardController,
+                    focusManager = focusManager
+                )
+            }
+
+            // Show Firestore-based error (identical to signup style)
+            if (phoneErrorText.isNotEmpty()) {
+                Text(
+                    text = phoneErrorText,
+                    color = Color.Red,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+
+            // NEW: Trigger Firestore check when phone number or country changes
+            LaunchedEffect(uiState.rawPhoneInput, uiState.selectedCountry) {
+                if (uiState.rawPhoneInput.isNotBlank()) {
+                    viewModel.checkPhoneNumberInFirestore(
+                        phone = uiState.rawPhoneInput,
+                        countryIso = uiState.selectedCountry.isoCode
+                    )
+                } else {
+                    viewModel.resetPhoneAllowed()
+                    phoneErrorText = ""
+                }
+            }
 
             val snackbarHostState = remember { SnackbarHostState() }
 
@@ -196,15 +236,32 @@ fun SignInScreen(
                 isSendingOtp = uiState.isSendingOtp,
                 onRememberMeChange = viewModel::onRememberMeChange,
                 onGetCodeClick = {
-                    val isValid = PhoneNumberUtils.isValidNumber(
+                    val isFormatValid = PhoneNumberUtils.isValidNumber(
                         uiState.rawPhoneInput,
                         uiState.selectedCountry.isoCode
                     )
 
-                    if (!isValid) {
-                        showPhoneError = true
-                        phoneFocusRequester.requestFocus()
-                    } else {
+                    // Wait a tiny bit if check is pending (isPhoneAllowed == null)
+                    scope.launch {
+                        if (isPhoneAllowed == null && uiState.rawPhoneInput.isNotBlank()) {
+                            // Optional: show loading or just wait briefly
+                            delay(800)  // Give time for Firestore response
+                        }
+
+                        if (!isFormatValid) {
+                            showPhoneError = true
+                            phoneFocusRequester.requestFocus()
+                            return@launch
+                        }
+
+                        if (isPhoneAllowed != true) {
+                            phoneErrorText = "Can't proceed, contact the school"
+                            phoneFocusRequester.requestFocus()
+                            return@launch
+                        }
+
+                        // All good → proceed
+                        phoneErrorText = ""
                         showPhoneError = false
                         keyboardController?.hide()
                         focusManager.clearFocus()
@@ -580,17 +637,6 @@ fun PhoneInputSection(
                     unfocusedBorderColor = if (displayError) Color.Red else Color.Gray
                 )
             )
-
-
-            if (displayError) {
-                Text(
-                    text = "Invalid phone number",
-                    color = Color.Red,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            }
         }
     }
 }
