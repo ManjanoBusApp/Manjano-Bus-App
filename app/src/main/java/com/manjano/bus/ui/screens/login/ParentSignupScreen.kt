@@ -208,6 +208,9 @@ fun SignupScreen(
     val studentFocusRequester = remember { FocusRequester() }
     val emailFocusRequester = remember { FocusRequester() }
     val context = androidx.compose.ui.platform.LocalContext.current
+    val isPhoneAllowed by signupViewModel.isPhoneAllowed.collectAsState()
+    var phoneErrorText by remember { mutableStateOf("") }
+
 
     LaunchedEffect(Unit) {
         parentFocusRequester.requestFocus()
@@ -470,46 +473,41 @@ fun SignupScreen(
 
         val phoneFocusRequester = remember { FocusRequester() }
 
-// Phone input
-        val keyboardController = LocalSoftwareKeyboardController.current
-        val focusManager = LocalFocusManager.current
-
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) {
-                        hasTouchedPhone = true
+                        phoneErrorText = ""
                         phoneError = false
-                    } else if (hasTouchedPhone) {
-                        val isValidPhone = try {
-                            PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
-                        } catch (e: Exception) {
-                            false
-                        }
-                        phoneError = phoneNumber.isBlank() || !isValidPhone
                     }
                 }
         ) {
-
             PhoneInputSection(
                 selectedCountry = selectedCountry,
                 phoneNumber = phoneNumber,
                 onCountrySelected = { selectedCountry = it },
                 onPhoneNumberChange = { newNumber ->
-                    hasTouchedPhone = true
                     phoneNumber = newNumber
+                    phoneErrorText = ""
                     phoneError = false
                 },
-
-                showError = phoneError,
-                onShowErrorChange = { phoneError = it },
+                showError = false,  // Force-disable any internal error UI from PhoneInputSection
+                onShowErrorChange = { /* completely ignore - do not set phoneError */ },
                 phoneFocusRequester = phoneFocusRequester,
                 keyboardController = keyboardController,
                 focusManager = focusManager
             )
         }
-
+        // Only show the allowed Firestore error message (nothing else)
+        if (phoneErrorText.isNotEmpty()) {
+            Text(
+                text = phoneErrorText,
+                color = Color.Red,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
 
         LaunchedEffect(Unit) {
             // Only request focus for phone when parent and child fields are valid and OTP is not yet requested
@@ -518,7 +516,29 @@ fun SignupScreen(
                 // phoneFocusRequester.requestFocus()
             }
         }
+        // NEW: Call Firestore check when phoneNumber changes
+        LaunchedEffect(phoneNumber) {
+            if (phoneNumber.isNotBlank()) {
+                signupViewModel.checkPhoneNumberInFirestore(
+                    phone = phoneNumber,
+                    countryIso = selectedCountry.isoCode
+                )
+            } else {
+                signupViewModel.resetPhoneAllowed()
+            }
+        }
 
+        // NEW: Call Firestore check when phoneNumber changes
+        LaunchedEffect(phoneNumber) {
+            if (phoneNumber.isNotBlank()) {
+                signupViewModel.checkPhoneNumberInFirestore(
+                    phone = phoneNumber,
+                    countryIso = selectedCountry.isoCode
+                )
+            } else {
+                signupViewModel.resetPhoneAllowed()
+            }
+        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -539,52 +559,67 @@ fun SignupScreen(
             onGetCodeClick = {
                 keyboardController?.hide()
 
-                // Validate all fields ONCE when Send Code is clicked
-                parentError = parentName.text.isEmpty()
+                scope.launch {
+                    // Call Firestore check if not already done
+                    if (phoneNumber.isNotBlank() && isPhoneAllowed == null) {
+                        signupViewModel.checkPhoneNumberInFirestore(
+                            phone = phoneNumber,
+                            countryIso = selectedCountry.isoCode
+                        )
+                        delay(500)  // Wait for state update
+                    }
 
-                hasTouchedChild = List(childrenNames.size) { true }
-                childErrors =
-                    childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
-                val hasEmptyChild = childErrors.any { it }
-                studentError = hasEmptyChild
-                emailError =
-                    email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
+                    // Validate other fields
+                    parentError = parentName.text.isEmpty()
+
+                    hasTouchedChild = List(childrenNames.size) { true }
+                    childErrors =
+                        childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
+                    val hasEmptyChild = childErrors.any { it }
+                    studentError = hasEmptyChild
+
+                    emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
                         .matches()
 
-                val isValidPhone = try {
-                    PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
-                } catch (e: Exception) {
-                    false
-                }
-                phoneError = phoneNumber.isEmpty() || !isValidPhone
+                    // Reset phone states
+                    phoneError = false
+                    phoneErrorText = ""
 
-                if (!parentError && !studentError && !emailError && !phoneError) {
-                    signupViewModel.requestOtp()
-                    showOtpMessage = true
-                    scope.launch {
+                    // ONLY check Firestore result for phone error
+                    val phoneNotAllowed = isPhoneAllowed != true
+
+                    if (phoneNotAllowed) {
+                        phoneErrorText = "Can't proceed, contact the school"
+                        phoneError = true
+                    }
+
+                    // Overall validity check
+                    val canProceed =
+                        !parentError && !hasEmptyChild && !emailError && !phoneNotAllowed
+
+                    if (canProceed) {
+                        // Proceed to OTP
+                        signupViewModel.requestOtp()
+                        showOtpMessage = true
                         delay(100)
                         if (scrollState.maxValue > 0) {
                             otpFocusRequester.requestFocus()
                             scrollState.animateScrollTo(scrollState.maxValue)
                         }
-                    }
-                } else {
-                    // Focus the first field with an error
-                    when {
-                        parentError -> parentFocusRequester.requestFocus()
-                        childErrors.any { it } -> {
-                            // Focus FIRST EMPTY child
-                            val firstEmptyChildIndex = childErrors.indexOfFirst { it }
-                            if (firstEmptyChildIndex >= 0) {
-                                // Focus the first empty child field
-                                if (firstEmptyChildIndex == 0) {
+                    } else {
+                        // Focus first invalid field
+                        when {
+                            parentError -> parentFocusRequester.requestFocus()
+                            hasEmptyChild -> {
+                                val firstEmpty = childErrors.indexOfFirst { it }
+                                if (firstEmpty >= 0 && firstEmpty == 0) {
                                     studentFocusRequester.requestFocus()
                                 }
                             }
-                        }
 
-                        emailError -> emailFocusRequester.requestFocus()
-                        phoneError -> phoneFocusRequester.requestFocus()
+                            emailError -> emailFocusRequester.requestFocus()
+                            phoneNotAllowed -> phoneFocusRequester.requestFocus()
+                        }
                     }
                 }
             },
@@ -658,8 +693,11 @@ fun SignupScreen(
                 childrenNames.all { it.text.isNotEmpty() } &&
                 email.text.isNotEmpty() &&
                 Patterns.EMAIL_ADDRESS.matcher(email.text).matches() &&
-                phoneNumber.isNotEmpty() &&
-                uiState.otpDigits.joinToString("") == Constants.TEST_OTP
+                phoneErrorText.isEmpty() &&
+                isPhoneAllowed == true &&                        // Phone must exist in Firestore
+                uiState.otpDigits.size == Constants.OTP_LENGTH && // OTP fully entered
+                uiState.otpDigits.all { it.isNotBlank() } &&      // All OTP digits filled
+                isOtpValid                                        // OTP is correct
 
         Button(
             onClick = {
@@ -728,7 +766,6 @@ fun SignupScreen(
         ) {
             Text("Continue", color = Color.White, fontSize = 16.sp)
         }
-
 
         Spacer(modifier = Modifier.height(12.dp))
 

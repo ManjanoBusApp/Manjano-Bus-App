@@ -4,5 +4,6 @@ data class Country(
     val flag: String,
     val dialCode: String,
     val name: String,
-    val isoCode: String
+    val isoCode: String,
+    val callingCode: String
 )
