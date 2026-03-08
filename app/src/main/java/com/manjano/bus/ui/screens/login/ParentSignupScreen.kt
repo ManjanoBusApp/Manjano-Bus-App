@@ -808,7 +808,6 @@ fun SignupScreen(
                                     studentFocusRequester.requestFocus()
                                 }
                             }
-
                             emailError -> emailFocusRequester.requestFocus()
                         }
                     }
