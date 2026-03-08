@@ -62,6 +62,12 @@ class SignInViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(SignInUiState())
     val uiState: StateFlow<SignInUiState> = _uiState
 
+    private var userRole: String? = null
+
+    fun setUserRole(role: String) {
+        userRole = role.lowercase()
+    }
+
     // ============ Phone number existence check for sign-in ============
     private val _isPhoneAllowed = MutableStateFlow<Boolean?>(null) // null = not checked yet
     val isPhoneAllowed: StateFlow<Boolean?> = _isPhoneAllowed
@@ -70,19 +76,24 @@ class SignInViewModel : ViewModel() {
         val db = FirebaseFirestore.getInstance()
 
         val normalizedInput = normalizePhoneNumber(phone, countryIso)
-        val inputDigits = normalizedInput.filter { it.isDigit() }  // pure digits
+        val inputDigits = normalizedInput.filter { it.isDigit() }
 
-        db.collection("parents")
+        // Decide collection based on role
+        val collectionName = when (userRole) {
+            "driver" -> "drivers"
+            "parent", null -> "parents"  // fallback to parents if role not set
+            else -> "parents"            // safety
+        }
+
+        db.collection(collectionName)
             .get()
             .addOnSuccessListener { documents ->
                 val matched = documents.documents.any { doc ->
                     val dbNumber = doc.getString("mobileNumber") ?: ""
 
                     if (countryIso.equals("KE", ignoreCase = true)) {
-                        // Kenyan numbers: exact match – DO NOT CHANGE (exact copy from working SignUpViewModel)
                         dbNumber == normalizedInput
                     } else {
-                        // INTERNATIONAL – keep the current working version
                         val dbClean = dbNumber.replace("[^+0-9]".toRegex(), "")
                         val inputClean = phone.replace("[^+0-9]".toRegex(), "")
 
@@ -106,9 +117,8 @@ class SignInViewModel : ViewModel() {
 
                 Log.d(
                     "PhoneCheck",
-                    "Input: $phone | Normalized: $normalizedInput | Digits: $inputDigits"
+                    "Role: $userRole | Collection: $collectionName | Input: $phone | Matched: $matched"
                 )
-                Log.d("PhoneCheck", "Found match: $matched | Docs scanned: ${documents.size()}")
             }
             .addOnFailureListener { e ->
                 Log.e("PhoneCheck", "Firestore failed: ${e.message}", e)

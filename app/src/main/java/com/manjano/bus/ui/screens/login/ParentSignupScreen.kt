@@ -489,11 +489,11 @@ fun SignupScreen(
                 onCountrySelected = { selectedCountry = it },
                 onPhoneNumberChange = { newNumber ->
                     phoneNumber = newNumber
-                    phoneErrorText = ""
-                    phoneError = false
+                    phoneErrorText = ""      // ← KEEP this (clear on typing is good)
+                    phoneError = false       // ← KEEP this
                 },
-                showError = false,  // Force-disable any internal error UI from PhoneInputSection
-                onShowErrorChange = { /* completely ignore - do not set phoneError */ },
+                showError = false,
+                onShowErrorChange = { /* ignore */ },
                 phoneFocusRequester = phoneFocusRequester,
                 keyboardController = keyboardController,
                 focusManager = focusManager
@@ -701,6 +701,7 @@ fun SignupScreen(
         Button(
             onClick = {
                 scope.launch {
+                    // Shake animation
                     repeat(2) {
                         continueShakeOffset.floatValue = 4f
                         delay(40)
@@ -708,50 +709,109 @@ fun SignupScreen(
                         delay(40)
                     }
                     continueShakeOffset.floatValue = 0f
-                }
 
-                parentError = parentName.text.isEmpty()
-                hasTouchedChild = List(childrenNames.size) { true }
-                val hasEmptyChild = childrenNames.any { it.text.isEmpty() }
-                childErrors = childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
-                studentError = hasEmptyChild
-                hasTouchedEmail = true
-                emailError =
-                    email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
+                    // Reset phone states
+                    phoneError = false
+                    phoneErrorText = ""
+
+                    // Format validation first
+                    val isFormatValid = PhoneNumberUtils.isValidNumber(
+                        phoneNumber,
+                        selectedCountry.isoCode
+                    )
+
+                    val isCompleteEnough = phoneNumber.isNotBlank() && phoneNumber.length >= 8
+
+                    // Wait for Firestore if needed
+                    if (isPhoneAllowed == null && phoneNumber.isNotBlank()) {
+                        delay(800)
+                    }
+
+                    // Clear previous phone error
+                    phoneErrorText = ""
+
+                    // Check format first - show "Invalid phone number" if bad
+                    if (!isFormatValid || !isCompleteEnough) {
+                        phoneErrorText = "Invalid phone number"
+                        phoneFocusRequester.requestFocus()
+                        return@launch
+                    }
+
+                    // Only if format is good, check Firestore
+                    if (isPhoneAllowed != true) {
+                        phoneErrorText = "Can't proceed, contact the school"
+                        phoneFocusRequester.requestFocus()
+                        return@launch
+                    }
+
+                    // All phone OK — now validate other fields
+                    parentError = parentName.text.isEmpty()
+                    hasTouchedChild = List(childrenNames.size) { true }
+                    childErrors =
+                        childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
+                    val hasEmptyChild = childErrors.any { it }
+                    studentError = hasEmptyChild
+                    hasTouchedEmail = true
+                    emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
                         .matches()
 
-                phoneError = phoneNumber.isEmpty()
+                    val canProceed = !parentError && !hasEmptyChild && !emailError
 
-                val enteredOtp = uiState.otpDigits.joinToString("")
-                val isTestOtp = enteredOtp == Constants.TEST_OTP
+                    if (canProceed) {
+                        val enteredOtp = uiState.otpDigits.joinToString("")
+                        val isTestOtp = enteredOtp == Constants.TEST_OTP
 
-                if (!parentError && !studentError && !emailError && !phoneError && isTestOtp) {
-                    Log.d("🔥", "TEST OTP used – initiating saveUserNames for Firebase setup.")
+                        if (isTestOtp) {
+                            Log.d(
+                                "🔥",
+                                "TEST OTP used – initiating saveUserNames for Firebase setup."
+                            )
 
-                    signupViewModel.saveUserNames(
-                        parentName.text,
-                        childrenNames.joinToString(",") { it.text },
-                        context
-                    )
+                            signupViewModel.saveUserNames(
+                                parentName.text,
+                                childrenNames.joinToString(",") { it.text },
+                                context
+                            )
 
-                    val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
-                    prefs.edit().apply {
-                        putString("parent_name", parentName.text)
-                        putString("children_names", childrenNames.joinToString(",") { it.text })
-                    }.apply()
+                            val prefs =
+                                context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                            prefs.edit().apply {
+                                putString("parent_name", parentName.text)
+                                putString(
+                                    "children_names",
+                                    childrenNames.joinToString(",") { it.text })
+                            }.apply()
 
-                    val encodedParent = URLEncoder.encode(parentName.text, StandardCharsets.UTF_8.toString())
-                    val encodedChildren = URLEncoder.encode(
-                        childrenNames.joinToString(",") { it.text },
-                        StandardCharsets.UTF_8.toString()
-                    )
-                    val encodedStatus = URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
-                    navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
-                        popUpTo("signup") { inclusive = true }
+                            val encodedParent = URLEncoder.encode(
+                                parentName.text,
+                                StandardCharsets.UTF_8.toString()
+                            )
+                            val encodedChildren = URLEncoder.encode(
+                                childrenNames.joinToString(",") { it.text },
+                                StandardCharsets.UTF_8.toString()
+                            )
+                            val encodedStatus =
+                                URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
+                            navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
+                                popUpTo("signup") { inclusive = true }
+                            }
+                        } else {
+                            // Real OTP flow (leave empty or add later)
+                        }
+                    } else {
+                        // Focus first invalid field
+                        when {
+                            parentError -> parentFocusRequester.requestFocus()
+                            hasEmptyChild -> {
+                                val firstEmpty = childErrors.indexOfFirst { it }
+                                if (firstEmpty >= 0) {
+                                    studentFocusRequester.requestFocus()
+                                }
+                            }
+
+                            emailError -> emailFocusRequester.requestFocus()
+                        }
                     }
-                }
-                else if (!parentError && !studentError && !emailError && !phoneError && !isTestOtp && enteredOtp.isNotEmpty()) {
-                    // Logic for real production OTP validation flow
                 }
             },
             enabled = isFormValid,

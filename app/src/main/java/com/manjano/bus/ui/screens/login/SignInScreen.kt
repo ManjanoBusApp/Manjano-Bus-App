@@ -102,6 +102,11 @@ fun SignInScreen(
     role: String
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    LaunchedEffect(role) {
+        viewModel.setUserRole(role)
+    }
+
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
@@ -437,6 +442,14 @@ fun PhoneInputSection(
     var expanded by remember { mutableStateOf(false) }
     val appPurple = Color(0xFF800080)
     var localPhone by remember { mutableStateOf(TextFieldValue(phoneNumber)) }
+    var isPhoneFieldFocused by remember { mutableStateOf(false) }
+
+    LaunchedEffect(isPhoneFieldFocused) {
+        if (isPhoneFieldFocused) {
+            delay(80)
+            keyboardController?.show()
+        }
+    }
     val phoneUtil = PhoneNumberUtil.getInstance()
     var lastCountry by remember { mutableStateOf(selectedCountry) }
 
@@ -579,10 +592,29 @@ fun PhoneInputSection(
                     var formatted = ""
                     limitedDigits.forEach { ch -> formatted = formatter.inputDigit(ch) }
 
-                    // FIX: always place cursor at the end
+                    // Calculate approximate new cursor position after formatting
+                    val oldSelectionStart =
+                        newValue.selection.start.coerceIn(0, newValue.text.length)
+// Count how many digits were before the old cursor
+                    var digitCountBeforeCursor = 0
+                    for (i in 0 until oldSelectionStart) {
+                        if (newValue.text[i].isDigit()) digitCountBeforeCursor++
+                    }
+// Now find the position in the new formatted string after that many digits
+                    var newCursorPos = 0
+                    var digitsSeen = 0
+                    while (newCursorPos < formatted.length && digitsSeen < digitCountBeforeCursor) {
+                        if (formatted[newCursorPos].isDigit()) digitsSeen++
+                        newCursorPos++
+                    }
+// If cursor was at end or after last digit, place at new end
+                    if (oldSelectionStart >= newValue.text.length || digitsSeen < digitCountBeforeCursor) {
+                        newCursorPos = formatted.length
+                    }
+
                     localPhone = TextFieldValue(
                         text = formatted,
-                        selection = TextRange(formatted.length)
+                        selection = TextRange(newCursorPos.coerceIn(0, formatted.length))
                     )
 
                     onPhoneNumberChange(limitedDigits)
@@ -641,6 +673,8 @@ fun PhoneInputSection(
                     .offset(x = (-4).dp)
                     .focusRequester(phoneFocusRequester)
                     .onFocusChanged { state: androidx.compose.ui.focus.FocusState ->
+                        isPhoneFieldFocused = state.isFocused   // ← just update the trigger state
+
                         if (!state.isFocused && localPhone.text.isNotEmpty()) {
                             val isValid = try {
                                 val proto =
