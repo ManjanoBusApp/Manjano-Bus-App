@@ -79,27 +79,10 @@ class SignInViewModel : ViewModel() {
                     val dbNumber = doc.getString("mobileNumber") ?: ""
 
                     if (countryIso.equals("KE", ignoreCase = true)) {
-                        // Kenyan: keep the working digits-only + leading zero logic
-                        val dbDigits = dbNumber.filter { it.isDigit() }
-                        val dbNormalized = when {
-                            dbDigits.length == 9 -> "0$dbDigits"
-                            dbDigits.length == 10 -> if (dbDigits.startsWith("0") || dbDigits.startsWith(
-                                    "011"
-                                )
-                            ) dbDigits else "0$dbDigits"
-
-                            else -> dbDigits
-                        }
-
-                        val inputNormalized = when {
-                            inputDigits.length == 9 -> "0$inputDigits"
-                            inputDigits.length == 10 -> inputDigits
-                            else -> inputDigits
-                        }
-
-                        dbNormalized == inputNormalized
+                        // Kenyan numbers: exact match – DO NOT CHANGE (exact copy from working SignUpViewModel)
+                        dbNumber == normalizedInput
                     } else {
-                        // INTERNATIONAL – exact copy from working SignUpViewModel
+                        // INTERNATIONAL – keep the current working version
                         val dbClean = dbNumber.replace("[^+0-9]".toRegex(), "")
                         val inputClean = phone.replace("[^+0-9]".toRegex(), "")
 

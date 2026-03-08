@@ -108,7 +108,6 @@ fun SignInScreen(
     val scope = rememberCoroutineScope()
     val otpFocusRequester = remember { FocusRequester() }
     var showValidationError by rememberSaveable { mutableStateOf(false) }
-    var showPhoneError by rememberSaveable { mutableStateOf(false) }
     val phoneFocusRequester = remember { FocusRequester() }
     val context = androidx.compose.ui.platform.LocalContext.current
 
@@ -193,7 +192,6 @@ fun SignInScreen(
                     onCountrySelected = viewModel::onCountrySelected,
                     onPhoneNumberChange = {
                         viewModel.onPhoneNumberChange(it)
-                        showPhoneError = false
                         phoneErrorText = ""  // Clear error on typing
                     },
                     showError = false,
@@ -241,19 +239,26 @@ fun SignInScreen(
                         uiState.selectedCountry.isoCode
                     )
 
-                    // Wait a tiny bit if check is pending (isPhoneAllowed == null)
+                    val isCompleteEnough = uiState.rawPhoneInput.isNotBlank() &&
+                            uiState.rawPhoneInput.length >= 8  // basic length check to avoid false "incomplete"
+
                     scope.launch {
+                        // Wait briefly if Firestore check is still pending
                         if (isPhoneAllowed == null && uiState.rawPhoneInput.isNotBlank()) {
-                            // Optional: show loading or just wait briefly
-                            delay(800)  // Give time for Firestore response
+                            delay(800)  // Allow time for async Firestore response
                         }
 
-                        if (!isFormatValid) {
-                            showPhoneError = true
+                        // Clear previous errors first
+                        phoneErrorText = ""
+
+                        if (!isFormatValid || !isCompleteEnough) {
+                            // Format or incomplete → show "Invalid phone number" after click
+                            phoneErrorText = "Invalid phone number"
                             phoneFocusRequester.requestFocus()
                             return@launch
                         }
 
+                        // Now check Firestore existence (only if format is OK)
                         if (isPhoneAllowed != true) {
                             phoneErrorText = "Can't proceed, contact the school"
                             phoneFocusRequester.requestFocus()
@@ -262,7 +267,6 @@ fun SignInScreen(
 
                         // All good → proceed
                         phoneErrorText = ""
-                        showPhoneError = false
                         keyboardController?.hide()
                         focusManager.clearFocus()
                         viewModel.requestOtp()
@@ -342,12 +346,33 @@ fun SignInScreen(
                 false
             }
 
-            val isOtpComplete = uiState.otpDigits.all { it.isNotEmpty() }
+
+// 1. Are all 4 digits filled?
+            val isOtpComplete by remember(uiState.otpDigits) {
+                derivedStateOf { uiState.otpDigits.all { it.isNotEmpty() } }
+            }
+
+// 2. Phone allowed (you already have this – keep it unchanged)
+            val phoneAllowed by remember(isPhoneAllowed) {
+                derivedStateOf { isPhoneAllowed == true }
+            }
+
+// 3. Final button enabled state – NO isOtpCorrect condition
+            val isContinueEnabled by remember(
+                isOtpComplete,
+                phoneAllowed,
+                uiState.isOtpSubmitting
+            ) {
+                derivedStateOf {
+                    isOtpComplete &&
+                            phoneAllowed &&
+                            !uiState.isOtpSubmitting
+                }
+            }
 
             Button(
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-
                     keyboardController?.hide()
                     focusManager.clearFocus()
                     showValidationError = false
@@ -365,9 +390,9 @@ fun SignInScreen(
                         continueShakeOffset.floatValue = 0f
                     }
                 },
-                enabled = isPhoneValid && isOtpComplete && !uiState.isOtpSubmitting,
+                enabled = isContinueEnabled,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isPhoneValid && isOtpComplete) Color(0xFF800080) else Color.LightGray,
+                    containerColor = if (isContinueEnabled) Color(0xFF800080) else Color.LightGray,
                     disabledContainerColor = Color.LightGray
                 ),
                 modifier = Modifier
@@ -381,7 +406,6 @@ fun SignInScreen(
                     fontSize = 16.sp
                 )
             }
-
 
             SignUpFooter(onSignUpClick = {
                 when (role) {
