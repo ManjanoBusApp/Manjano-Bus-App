@@ -187,21 +187,20 @@ fun AdminSignInScreen(
                         showUnauthorizedError = false
 
                         var normalizedInput = uiState.rawPhoneInput.filter { it.isDigit() }
-                        if (normalizedInput.startsWith("254")) {
-                            normalizedInput = "0" + normalizedInput.substring(3)
+
+                        // Handle common Kenyan formats: 07xxxxxxxx, 7xxxxxxxx, 254xxxxxxxxx
+                        normalizedInput = when {
+                            normalizedInput.startsWith("254") -> "0" + normalizedInput.substring(3)
+                            normalizedInput.startsWith("7") && normalizedInput.length == 9 -> "0$normalizedInput"
+                            normalizedInput.startsWith("07") -> normalizedInput
+                            normalizedInput.startsWith("011") -> normalizedInput
+                            else -> normalizedInput
                         }
 
                         Log.d(
                             "AdminSignInDebug",
                             "Normalized phone for Firestore query: $normalizedInput"
                         )
-
-                        // Normalize phone for Firestore query: remove spaces, handle 07XXXXXXX format
-                        normalizedInput = when {
-                            normalizedInput.startsWith("07") -> normalizedInput
-                            normalizedInput.startsWith("254") -> "0" + normalizedInput.substring(3)
-                            else -> normalizedInput
-                        }
 
                         viewModel.getAdminRoleByMobile(normalizedInput) { role ->
                             if (role == null) {
@@ -291,8 +290,10 @@ fun AdminSignInScreen(
             LaunchedEffect(uiState.rawPhoneInput) {
                 val normalizedInput = uiState.rawPhoneInput.filter { it.isDigit() }.let {
                     when {
-                        it.startsWith("07") -> it
                         it.startsWith("254") -> "0" + it.substring(3)
+                        it.startsWith("7") && it.length == 9 -> "0$it"
+                        it.startsWith("07") -> it
+                        it.startsWith("011") -> it
                         else -> it
                     }
                 }
@@ -307,7 +308,6 @@ fun AdminSignInScreen(
                     showUnauthorizedError = false
                 }
             }
-
             val isPhoneValid = try {
                 val proto = PhoneNumberUtil.getInstance().parse(
                     uiState.rawPhoneInput,

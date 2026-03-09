@@ -357,8 +357,14 @@ fun AdminSignupScreen(
 
                     // Normalize phone number
                     var normalizedPhone = phoneNumber.filter { it.isDigit() }
-                    if (normalizedPhone.startsWith("254")) {
-                        normalizedPhone = "0" + normalizedPhone.substring(3)
+
+                    // Handle common Kenyan formats: 07xxxxxxxx, 7xxxxxxxx, 254xxxxxxxxx, 011xxxxxxx
+                    normalizedPhone = when {
+                        normalizedPhone.startsWith("254") -> "0" + normalizedPhone.substring(3)
+                        normalizedPhone.startsWith("7") && normalizedPhone.length == 9 -> "0$normalizedPhone"
+                        normalizedPhone.startsWith("07") -> normalizedPhone
+                        normalizedPhone.startsWith("011") -> normalizedPhone
+                        else -> normalizedPhone
                     }
 
                     // Check Firestore for admin role
@@ -459,7 +465,14 @@ fun AdminSignupScreen(
 
         val normalizedPhone by remember(phoneNumber) {
             derivedStateOf {
-                phoneNumber.filter { it.isDigit() }
+                val digits = phoneNumber.filter { it.isDigit() }
+                when {
+                    digits.startsWith("254") -> "0" + digits.substring(3)
+                    digits.startsWith("7") && digits.length == 9 -> "0$digits"
+                    digits.startsWith("07") -> digits
+                    digits.startsWith("011") -> digits
+                    else -> digits
+                }
             }
         }
 
@@ -474,7 +487,6 @@ fun AdminSignupScreen(
                 showUnauthorizedError = false
             }
         }
-
         val isContinueEnabled by remember(
             adminName.text,
             idNumber.text,

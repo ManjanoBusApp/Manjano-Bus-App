@@ -93,6 +93,9 @@ fun DriverSignupScreen(
     var idTouched by remember { mutableStateOf(false) }
     var schoolTouched by remember { mutableStateOf(false) }
     var phoneError by remember { mutableStateOf(false) }
+    var phoneTouched by remember { mutableStateOf(false) }
+    var phoneErrorInvalid by remember { mutableStateOf(false) }
+    var phoneErrorNotRegistered by remember { mutableStateOf(false) }
     var selectedCountry by remember { mutableStateOf(CountryRepository.countries.first()) }
     var phoneNumber by remember { mutableStateOf("") }
     var showOtpMessage by remember { mutableStateOf(false) }
@@ -105,6 +108,14 @@ fun DriverSignupScreen(
     val idFocusRequester = remember { FocusRequester() }
     val schoolFocusRequester = remember { FocusRequester() }
 
+    val phoneAllowed = signupViewModel.isPhoneAllowed.collectAsState().value
+
+    LaunchedEffect(phoneAllowed) {
+        if (phoneAllowed == null) return@LaunchedEffect
+
+        // Only update this error for numbers not in Firestore
+        phoneErrorNotRegistered = phoneAllowed == false
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -278,33 +289,15 @@ fun DriverSignupScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        // ---------------------------- PHONE INPUT ----------------------------
         val phoneFocusRequester = remember { FocusRequester() }
 
-        // Phone input
-        // 1. Ensure these are defined at the TOP of your Screen Composable
-        val keyboardController =
-            androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
-        val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
-
-        // 2. Pass them into the function below
-        var phoneTouched by remember { mutableStateOf(false) }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .onFocusChanged { focusState ->
                     if (focusState.hasFocus) {
-                        phoneTouched = true
-                        phoneError = false
-                    } else if (!focusState.hasFocus && phoneTouched) {
-                        // Focus has left the entire phone section
-                        val isValidPhone = try {
-                            PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
-                        } catch (e: Exception) {
-                            false
-                        }
-                        if (phoneNumber.isEmpty() || !isValidPhone) {
-                            phoneError = true
-                        }
+                        phoneErrorInvalid = false
                     }
                 }
         ) {
@@ -312,33 +305,98 @@ fun DriverSignupScreen(
                 selectedCountry = selectedCountry,
                 phoneNumber = phoneNumber,
                 onCountrySelected = { selectedCountry = it },
-                onPhoneNumberChange = {
-                    phoneNumber = it
-                    phoneError = false
-                    val isValidPhone = try {
-                        PhoneNumberUtils.isValidNumber(it, selectedCountry.isoCode)
-                    } catch (e: Exception) {
-                        false
-                    }
-                    if (isValidPhone) {
-                        // Hide keyboard and automatically move focus to OTP
-                        keyboardController?.hide()
-                        showOtpMessage = true // Show the "Please enter code" text
-                        scope.launch {
-                            delay(100) // Brief delay to ensure UI handles the transition
-                            otpFocusRequester.requestFocus()
-                        }
+                onPhoneNumberChange = { input ->
+                    phoneNumber = input
+                    if (phoneTouched) {
+                        phoneErrorInvalid = false
                     }
                 },
-                showError = phoneError,
-                onShowErrorChange = { phoneError = it },
+                showError = phoneErrorInvalid || phoneErrorNotRegistered,
+                onShowErrorChange = {},
                 phoneFocusRequester = phoneFocusRequester,
                 keyboardController = keyboardController,
                 focusManager = focusManager
             )
         }
-        Spacer(modifier = Modifier.height(16.dp))
 
+// Only show error texts after Send Code was tapped
+        if (phoneTouched) {
+            if (phoneErrorInvalid) {
+                Text(
+                    text = "Invalid phone number",
+                    color = Color.Red,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            } else if (phoneErrorNotRegistered) {
+                Text(
+                    text = "Can't proceed, contact the school",
+                    color = Color.Red,
+                    fontSize = 12.sp,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+
+// LaunchedEffect to check Firestore when user types
+        LaunchedEffect(phoneNumber) {
+            if (phoneNumber.isNotBlank()) {
+                signupViewModel.checkDriverPhoneNumberInFirestore(
+                    phone = phoneNumber,
+                    countryIso = selectedCountry.isoCode
+                )
+            } else {
+                signupViewModel.resetPhoneAllowed()
+            }
+        }
+
+// ---------------------------- SEND CODE VALIDATION ----------------------------
+        // ---------------------------- SEND CODE VALIDATION ----------------------------
+        ActionRow(
+            rememberMe = uiState.rememberMe,
+            isSendingOtp = uiState.isSendingOtp,
+            onRememberMeChange = signupViewModel::onRememberMeChange,
+            onGetCodeClick = {
+                keyboardController?.hide()
+                phoneTouched = true // Errors only show after tapping Send Code
+
+                driverTouched = true
+                idTouched = true
+                schoolTouched = true
+
+                driverError = driverName.text.isBlank()
+                idError = idNumber.text.isBlank()
+                schoolError = schoolName.text.isBlank()
+
+                // ---------------- PHONE VALIDATION ----------------
+                val isValidPhone = try {
+                    PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                } catch (e: Exception) {
+                    false
+                }
+
+                phoneErrorInvalid = !isValidPhone
+                // Only check Firestore if phone format is valid
+                if (isValidPhone) {
+                    signupViewModel.checkDriverPhoneNumberInFirestore(
+                        phoneNumber,
+                        selectedCountry.isoCode
+                    )
+                }
+
+                // ---------------- SHOW OTP MESSAGE ----------------
+                // Only show "Check SMS" message if everything is valid and phone is allowed
+                showOtpMessage = isValidPhone && phoneAllowed == true
+
+                // ---------------- FOCUS FIRST INVALID FIELD ----------------
+                when {
+                    driverError -> driverFocusRequester.requestFocus()
+                    idError -> idFocusRequester.requestFocus()
+                    schoolError -> schoolFocusRequester.requestFocus()
+                    phoneErrorInvalid || phoneErrorNotRegistered -> phoneFocusRequester.requestFocus()
+                }
+            }
+        )
         SnackbarHost(
             hostState = snackbarHostState
         ) { data ->
@@ -349,49 +407,6 @@ fun DriverSignupScreen(
             )
         }
 
-        ActionRow(
-            rememberMe = uiState.rememberMe,
-            isSendingOtp = uiState.isSendingOtp,
-            onRememberMeChange = signupViewModel::onRememberMeChange,
-            onGetCodeClick = {
-                keyboardController?.hide()
-
-                driverTouched = true
-                idTouched = true
-                schoolTouched = true
-                phoneTouched = true
-
-                driverError = driverName.text.isBlank()
-                idError = idNumber.text.isBlank()
-                schoolError = schoolName.text.isBlank()
-                val isValidPhone = try {
-                    PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
-                } catch (e: Exception) {
-                    false
-                }
-                phoneError = phoneNumber.isBlank() || !isValidPhone
-
-                if (!driverError && !idError && !schoolError && !phoneError) {
-                    signupViewModel.requestOtp()
-                    showOtpMessage = true
-                    scope.launch {
-                        delay(100)
-                        if (scrollState.maxValue > 0) {
-                            otpFocusRequester.requestFocus()
-                            scrollState.animateScrollTo(scrollState.maxValue)
-                        }
-                    }
-                } else {
-                    // Jump cursor to first empty field
-                    when {
-                        driverError -> driverFocusRequester.requestFocus()
-                        idError -> idFocusRequester.requestFocus()
-                        schoolError -> schoolFocusRequester.requestFocus()
-                        phoneError -> phoneFocusRequester.requestFocus()
-                    }
-                }
-            },
-        )
         ResendTimerSection(
             timer = uiState.resendTimerSeconds,
             canResend = uiState.canResendOtp,
@@ -405,6 +420,7 @@ fun DriverSignupScreen(
                 modifier = Modifier.padding(vertical = 4.dp)
             )
         }
+
         if (showOtpErrorMessage) { // → New: Show invalid OTP message
             Text(
                 text = "Incorrect code. Send code again.",
@@ -461,10 +477,12 @@ fun DriverSignupScreen(
 
         val isOtpValid by signupViewModel.isOtpValid.collectAsState()
         val continueShakeOffset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+        val isPhoneAllowed by signupViewModel.isPhoneAllowed.collectAsState(initial = null)
 
         Button(
             onClick = {
                 scope.launch {
+                    // Shake animation
                     repeat(2) {
                         continueShakeOffset.floatValue = 4f
                         delay(40)
@@ -474,6 +492,7 @@ fun DriverSignupScreen(
                     continueShakeOffset.floatValue = 0f
                 }
 
+                // Field validations
                 driverError = driverName.text.isEmpty()
                 idError = idNumber.text.isEmpty()
                 schoolError = schoolName.text.isEmpty()
@@ -485,20 +504,24 @@ fun DriverSignupScreen(
                 }
                 phoneError = phoneNumber.isEmpty() || !isValidPhone
 
-                if (!driverError && !idError && !schoolError && !phoneError && uiState.otpDigits.joinToString(
-                        ""
-                    ) == Constants.TEST_OTP
+                // Only allow navigation if phone is allowed
+                if (!driverError && !idError && !schoolError && !phoneError &&
+                    uiState.otpDigits.joinToString("") == Constants.TEST_OTP &&
+                    isPhoneAllowed == true
                 ) {
                     navController.navigate("driver_dashboard") {
                         popUpTo("driver_signup") { inclusive = true }
                     }
+                } else if (isPhoneAllowed == false) {
+                    phoneErrorNotRegistered = true
                 }
             },
             enabled = driverName.text.isNotEmpty() &&
                     idNumber.text.isNotEmpty() &&
                     schoolName.text.isNotEmpty() &&
                     phoneNumber.isNotEmpty() &&
-                    uiState.otpDigits.joinToString("") == Constants.TEST_OTP,
+                    uiState.otpDigits.joinToString("") == Constants.TEST_OTP &&
+                    isPhoneAllowed == true, // <-- NEW: button disabled until Firestore confirms
             modifier = Modifier
                 .fillMaxWidth()
                 .offset(x = continueShakeOffset.floatValue.dp),

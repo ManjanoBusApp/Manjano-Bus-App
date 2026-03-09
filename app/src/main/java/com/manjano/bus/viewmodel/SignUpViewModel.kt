@@ -48,12 +48,21 @@ class SignUpViewModel : ViewModel() {
     private val _isOtpValid = MutableStateFlow(false)
     val isOtpValid: StateFlow<Boolean> get() = _isOtpValid
 
+
     private val database = FirebaseDatabase.getInstance().reference
     private val firestore = FirebaseFirestore.getInstance()
 
     // ============ NEW: Phone number check for parent signup ============
     private val _isPhoneAllowed = MutableStateFlow<Boolean?>(null) // null = not checked yet
     val isPhoneAllowed: StateFlow<Boolean?> = _isPhoneAllowed
+
+    // NEW: show phone error only after Send Code is tapped
+    private val _showPhoneError = MutableStateFlow(false)
+    val showPhoneError: StateFlow<Boolean> = _showPhoneError
+
+    fun onSendCodeTapped() {
+        _showPhoneError.value = true
+    }
 
     fun checkPhoneNumber(phoneNumber: String, schoolName: String) {
         viewModelScope.launch {
@@ -317,12 +326,27 @@ class SignUpViewModel : ViewModel() {
     }
 
     fun saveUserNames(parentName: String, childrenNames: String, context: Context) {
-        // Do NOT write to Firestore — only signal that signup is complete
         Log.d("🔥", "Signup complete. No Firestore write required.")
+        _uiState.value = _uiState.value.copy(navigateToDashboard = true)
+    }
 
-        // Update UI state to allow navigation
-        _uiState.value = _uiState.value.copy(
-            navigateToDashboard = true
-        )
+    // New function, outside of saveUserNames
+    fun checkDriverPhoneNumberInFirestore(phone: String, countryIso: String) {
+        val db = FirebaseFirestore.getInstance()
+        val normalizedInput = normalizePhoneNumber(phone, countryIso)
+
+        db.collection("drivers")
+            .get()
+            .addOnSuccessListener { snapshot ->
+                val matched = snapshot.documents.any { doc ->
+                    val dbNumber = doc.getString("mobileNumber")?.filter { it.isDigit() } ?: ""
+                    val inputNumber = normalizedInput.filter { it.isDigit() }
+                    dbNumber == inputNumber
+                }
+                _isPhoneAllowed.value = matched
+            }
+            .addOnFailureListener {
+                _isPhoneAllowed.value = false
+            }
     }
 }
