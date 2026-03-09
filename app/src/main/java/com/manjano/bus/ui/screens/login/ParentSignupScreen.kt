@@ -119,7 +119,8 @@ fun SignupOtpInputRow(
             safeOtp.forEachIndexed { index, digit ->
                 Box(
                     modifier = Modifier.onFocusChanged { focusState ->
-                        if (!focusState.isFocused && digit.isEmpty()) {
+                        // Clear error immediately when any OTP box is focused
+                        if (focusState.isFocused) {
                             onClearError()
                         }
                     }
@@ -560,13 +561,16 @@ fun SignupScreen(
                 keyboardController?.hide()
 
                 scope.launch {
+                    // --- FIX: hide previous incorrect OTP message ---
+                    showOtpErrorMessage = false  // ← Reset here
+
                     // Call Firestore check if not already done
                     if (phoneNumber.isNotBlank() && isPhoneAllowed == null) {
                         signupViewModel.checkPhoneNumberInFirestore(
                             phone = phoneNumber,
                             countryIso = selectedCountry.isoCode
                         )
-                        delay(500)  // Wait for state update
+                        delay(500)
                     }
 
                     // Validate other fields
