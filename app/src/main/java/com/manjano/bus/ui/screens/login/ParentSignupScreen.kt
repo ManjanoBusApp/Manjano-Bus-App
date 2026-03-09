@@ -659,7 +659,7 @@ fun SignupScreen(
                     signupViewModel.onOtpDigitChange(index, digit)
                     otpBoxErrors[index] = digit.isEmpty()
                 }
-                showOtpErrorMessage = otpBoxErrors.any { it }
+
                 if (digits.all { it.isNotEmpty() }) {
                     val enteredOtp = digits.joinToString("")
                     if (enteredOtp == Constants.TEST_OTP) {
@@ -667,6 +667,18 @@ fun SignupScreen(
                         signupViewModel.setOtpValid(true)
                     } else {
                         signupViewModel.setOtpValid(false)
+
+                        // ✅ Step 1: Clear OTP boxes on wrong code
+                        val clearedOtp = List(Constants.OTP_LENGTH) { "" }
+                        clearedOtp.forEachIndexed { index, _ ->
+                            signupViewModel.onOtpDigitChange(index, "")
+                            otpBoxErrors[index] = true
+                        }
+
+                        // Move cursor back to first box
+                        otpFocusRequester.requestFocus()
+
+                        // Show error message
                         showOtpErrorMessage = true
                     }
                 }
@@ -681,7 +693,6 @@ fun SignupScreen(
             isSending = uiState.isOtpSubmitting,
             focusRequester = otpFocusRequester
         )
-
 
         Spacer(modifier = Modifier.height(12.dp))
 
