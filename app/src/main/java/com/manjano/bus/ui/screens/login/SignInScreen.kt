@@ -308,7 +308,7 @@ fun SignInScreen(
                 otpErrorMessage = uiState.otpErrorMessage,
                 shouldShakeOtp = uiState.shouldShakeOtp,
                 onOtpChange = { digits ->
-                    // Hide the "Check SMS" message as soon as user interacts
+
                     viewModel.hideSmsMessage()
 
                     digits.forEachIndexed { index, digit ->
@@ -316,14 +316,47 @@ fun SignInScreen(
                             keyboardController?.hide()
                         }
                     }
+
+                    // When all digits are filled check if OTP matches the test code
+                    if (digits.all { it.isNotEmpty() }) {
+
+                        val enteredOtp = digits.joinToString("")
+
+                        if (enteredOtp == Constants.TEST_OTP) {
+
+                            keyboardController?.hide()
+                            viewModel.setOtpValid(true)
+
+                        } else {
+
+                            viewModel.setOtpValid(false)
+
+                            scope.launch {
+
+                                delay(1000) // allow user to see wrong code briefly
+
+                                repeat(Constants.OTP_LENGTH) { index ->
+                                    viewModel.onOtpDigitChange(index, "") {
+                                        keyboardController?.hide()
+                                    }
+                                }
+
+                                focusManager.clearFocus()
+
+                                delay(50)
+
+                                otpFocusRequester.requestFocus()
+                            }
+                        }
+                    }
                 },
+
                 keyboardController = keyboardController,
                 onClearError = { showValidationError = false },
                 onAutoVerify = { },
                 isSending = uiState.isOtpSubmitting,
                 focusRequester = otpFocusRequester
             )
-
 
             AnimatedVisibility(visible = uiState.showOtpError) {
                 Text(
@@ -339,6 +372,26 @@ fun SignInScreen(
                 )
             }
 
+
+//     Auto-refocus first OTP box + show keyboard after failed verification
+
+            LaunchedEffect(uiState.showOtpError, uiState.otpDigits) {
+                if (uiState.showOtpError == true &&
+                    uiState.otpDigits.all { it.isEmpty() } &&
+                    uiState.otpErrorMessage?.isNotBlank() == true
+                ) {
+
+                    // Give shake animation + error visibility time to settle
+                    delay(180)           // ← tune between 120–300 ms if needed
+
+                    // Important sequence from the working file
+                    focusManager.clearFocus()           // reset any stale focus
+                    delay(60)                           // tiny breath
+
+                    otpFocusRequester.requestFocus()    // request on first box
+                    keyboardController?.show()          // explicitly show keyboard
+                }
+            }
             val continueShakeOffset = remember { mutableFloatStateOf(0f) }
             val haptic = LocalHapticFeedback.current
 
@@ -835,7 +888,7 @@ fun OtpInputRow(
     onClearError: () -> Unit,
     onAutoVerify: () -> Unit,
     isSending: Boolean = false,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester        // this is the one for index 0
 ) {
     val safeOtp = if (otp.size == Constants.OTP_LENGTH) otp else List(Constants.OTP_LENGTH) { "" }
     val focusRequesters = remember { List(Constants.OTP_LENGTH) { FocusRequester() } }
@@ -844,6 +897,26 @@ fun OtpInputRow(
     val offsetX by animateDpAsState(
         targetValue = if (shouldShakeOtp) 8.dp else 0.dp
     )
+
+    // ────────────────────────────────────────────────
+    //     NEW: Auto-refocus + show keyboard on error + cleared
+    // ────────────────────────────────────────────────
+    val hasErrorAndIsCleared by remember(otp, otpErrorMessage) {
+        derivedStateOf {
+            otpErrorMessage?.isNotBlank() == true &&
+                    safeOtp.all { it.isEmpty() }
+        }
+    }
+
+    LaunchedEffect(hasErrorAndIsCleared) {
+        if (hasErrorAndIsCleared) {
+            // Small delay helps animation/previous clear settle
+            delay(120)   // 80–150 ms usually feels natural
+            focusRequester.requestFocus()           // ← first box (the one passed from parent)
+            keyboardController?.show()
+        }
+    }
+    // ────────────────────────────────────────────────
 
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -864,10 +937,10 @@ fun OtpInputRow(
                             val newOtp = safeOtp.toMutableList()
                             newOtp[index] = newValue
                             onOtpChange(newOtp)
+
                             if (newValue.isNotEmpty() && index < Constants.OTP_LENGTH - 1) {
                                 focusRequesters[index + 1].requestFocus()
                             }
-
                             if (newValue.isNotEmpty() && index == Constants.OTP_LENGTH - 1) {
                                 keyboardController?.hide()
                             }
@@ -877,6 +950,7 @@ fun OtpInputRow(
                     textStyle = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
                     modifier = Modifier
                         .size(50.dp)
+                        // Important: first field uses the parent's focusRequester
                         .focusRequester(if (index == 0) focusRequester else focusRequesters[index]),
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,

@@ -130,6 +130,23 @@ class SignInViewModel : ViewModel() {
         _isPhoneAllowed.value = null
     }
 
+    fun setOtpValid(isValid: Boolean) {
+        if (isValid) {
+            _uiState.value = _uiState.value.copy(
+                otpErrorMessage = null,
+                shouldShakeOtp = false,
+                isOtpIncorrect = false,
+                showOtpError = false
+            )
+        } else {
+            _uiState.value = _uiState.value.copy(
+                otpErrorMessage = "Incorrect code. Send code again.",
+                shouldShakeOtp = true,
+                isOtpIncorrect = true,
+                showOtpError = true
+            )
+        }
+    }
     // Reuse or copy the normalizePhoneNumber function from SignUpViewModel
     fun normalizePhoneNumber(rawNumber: String, countryIso: String): String {
         val digitsOnly = rawNumber.filter { it.isDigit() }
