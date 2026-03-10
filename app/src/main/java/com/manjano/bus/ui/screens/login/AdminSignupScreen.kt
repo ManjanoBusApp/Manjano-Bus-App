@@ -342,6 +342,7 @@ fun AdminSignupScreen(
                     schoolError = schoolName.text.isEmpty()
                     positionError = currentPosition.text.isEmpty()
                     phoneError = phoneNumber.isEmpty()
+                    showOtpErrorMessage = false
 
                     // Focus the first field with an error (if any)
                     when {
@@ -391,7 +392,10 @@ fun AdminSignupScreen(
         ResendTimerSection(
             timer = uiState.resendTimerSeconds,
             canResend = uiState.canResendOtp,
-            onResendClick = { signupViewModel.resendOtp() }
+            onResendClick = {
+                showOtpErrorMessage = false          // ← ADD THIS LINE
+                signupViewModel.resendOtp()
+            }
         )
         // Collect uiState in composable
         val uiState by signupViewModel.uiState.collectAsState()
