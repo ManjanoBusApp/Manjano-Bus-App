@@ -251,11 +251,46 @@ fun AdminSignInScreen(
                 otpErrorMessage = uiState.otpErrorMessage,
                 shouldShakeOtp = uiState.shouldShakeOtp,
                 onOtpChange = { digits ->
-                    viewModel.hideSmsMessage()  // hide SMS prompt immediately
+
+                    viewModel.hideSmsMessage()
 
                     digits.forEachIndexed { index, digit ->
                         viewModel.onOtpDigitChange(index, digit) {
                             keyboardController?.hide()
+                        }
+                    }
+
+                    // When all digits are filled → check OTP (same logic as parent/driver screen)
+                    if (digits.all { it.isNotEmpty() }) {
+
+                        val enteredOtp = digits.joinToString("")
+
+                        if (enteredOtp == Constants.TEST_OTP) {
+
+                            keyboardController?.hide()
+                            viewModel.setOtpValid(true)
+
+                        } else {
+
+                            viewModel.setOtpValid(false)
+
+                            scope.launch {
+
+                                delay(1000) // give user a moment to see the error
+
+                                // Clear all OTP digits
+                                repeat(Constants.OTP_LENGTH) { index ->
+                                    viewModel.onOtpDigitChange(index, "") {
+                                        keyboardController?.hide()
+                                    }
+                                }
+
+                                focusManager.clearFocus()
+
+                                delay(50)
+
+                                otpFocusRequester.requestFocus()
+                            }
                         }
                     }
                 },
@@ -265,6 +300,23 @@ fun AdminSignInScreen(
                 isSending = uiState.isOtpSubmitting,
                 focusRequester = otpFocusRequester
             )
+
+            // Auto-refocus first OTP box + show keyboard after failed verification
+            LaunchedEffect(uiState.showOtpError, uiState.otpDigits) {
+                if (uiState.showOtpError == true &&
+                    uiState.otpDigits.all { it.isEmpty() } &&
+                    uiState.otpErrorMessage?.isNotBlank() == true
+                ) {
+                    // Give shake animation + error visibility time to settle
+                    delay(180)           // tune between 120–300 ms if needed
+
+                    focusManager.clearFocus()           // reset any stale focus
+                    delay(60)
+
+                    otpFocusRequester.requestFocus()    // first box
+                    keyboardController?.show()          // force keyboard back
+                }
+            }
 
             AnimatedVisibility(visible = uiState.showOtpError) {
 
@@ -308,20 +360,49 @@ fun AdminSignInScreen(
                     showUnauthorizedError = false
                 }
             }
-            val isPhoneValid = try {
-                val proto = PhoneNumberUtil.getInstance().parse(
-                    uiState.rawPhoneInput,
-                    uiState.selectedCountry.isoCode
-                )
-                PhoneNumberUtil.getInstance().isValidNumberForRegion(
-                    proto,
-                    uiState.selectedCountry.isoCode
-                )
-            } catch (e: Exception) {
-                false
+            // ────────────────────────────────────────────────
+// Phone validity (exact same logic you already have)
+// ────────────────────────────────────────────────
+            val isPhoneValid by remember(uiState.rawPhoneInput, uiState.selectedCountry) {
+                derivedStateOf {
+                    try {
+                        val proto = PhoneNumberUtil.getInstance().parse(
+                            uiState.rawPhoneInput,
+                            uiState.selectedCountry.isoCode
+                        )
+                        PhoneNumberUtil.getInstance().isValidNumberForRegion(
+                            proto,
+                            uiState.selectedCountry.isoCode
+                        )
+                    } catch (e: Exception) {
+                        false
+                    }
+                }
             }
 
-            val isOtpComplete = uiState.otpDigits.all { it.isNotEmpty() }
+// ────────────────────────────────────────────────
+// OTP complete (reactive, recomposes only when digits change)
+// ────────────────────────────────────────────────
+            val isOtpComplete by remember(uiState.otpDigits) {
+                derivedStateOf { uiState.otpDigits.all { it.isNotEmpty() } }
+            }
+
+// ────────────────────────────────────────────────
+// Final enabled state (clean, single source of truth)
+// ────────────────────────────────────────────────
+            val isContinueEnabled by remember(
+                isPhoneValid,
+                isPhoneAuthorized,
+                isOtpComplete,
+                uiState.isOtpSubmitting
+            ) {
+                derivedStateOf {
+                    isPhoneValid &&
+                            isPhoneAuthorized &&
+                            isOtpComplete &&
+                            !uiState.isOtpSubmitting
+                }
+            }
 
             Button(
                 onClick = {
@@ -344,16 +425,9 @@ fun AdminSignInScreen(
                         continueShakeOffset.floatValue = 0f
                     }
                 },
-                enabled = isPhoneValid &&
-                        isPhoneAuthorized &&
-                        isOtpComplete &&
-                        !uiState.isOtpSubmitting,
+                enabled = isContinueEnabled,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor =
-                        if (isPhoneValid && isPhoneAuthorized && isOtpComplete)
-                            Color(0xFF800080)
-                        else
-                            Color.LightGray,
+                    containerColor = if (isContinueEnabled) Color(0xFF800080) else Color.LightGray,
                     disabledContainerColor = Color.LightGray
                 ),
                 modifier = Modifier
@@ -367,7 +441,6 @@ fun AdminSignInScreen(
                     fontSize = 16.sp
                 )
             }
-
             SignUpFooter(
                 onSignUpClick = {
 

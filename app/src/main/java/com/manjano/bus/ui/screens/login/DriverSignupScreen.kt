@@ -173,6 +173,7 @@ fun DriverSignupScreen(
                 capitalization = KeyboardCapitalization.Words,
                 imeAction = ImeAction.Next
             ),
+
             singleLine = true,
             modifier = Modifier
                 .fillMaxWidth()
@@ -358,25 +359,25 @@ fun DriverSignupScreen(
             onRememberMeChange = signupViewModel::onRememberMeChange,
             onGetCodeClick = {
                 keyboardController?.hide()
-                phoneTouched = true // Errors only show after tapping Send Code
 
+                // Mark fields as touched to show errors
+                phoneTouched = true
                 driverTouched = true
                 idTouched = true
                 schoolTouched = true
 
+                // Validate fields
                 driverError = driverName.text.isBlank()
                 idError = idNumber.text.isBlank()
                 schoolError = schoolName.text.isBlank()
 
-                // ---------------- PHONE VALIDATION ----------------
+                // Phone validation
                 val isValidPhone = try {
                     PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
                 } catch (e: Exception) {
                     false
                 }
-
                 phoneErrorInvalid = !isValidPhone
-                // Only check Firestore if phone format is valid
                 if (isValidPhone) {
                     signupViewModel.checkDriverPhoneNumberInFirestore(
                         phoneNumber,
@@ -384,16 +385,19 @@ fun DriverSignupScreen(
                     )
                 }
 
-                // ---------------- SHOW OTP MESSAGE ----------------
-                // Only show "Check SMS" message if everything is valid and phone is allowed
+                // --- UA FIX: reset previous OTP error ---
+                showOtpErrorMessage = false
+
+                // Show "Check SMS" message only if phone is valid & allowed
                 showOtpMessage = isValidPhone && phoneAllowed == true
 
-                // ---------------- FOCUS FIRST INVALID FIELD ----------------
+                // Focus the first invalid field or OTP field if all valid
                 when {
                     driverError -> driverFocusRequester.requestFocus()
                     idError -> idFocusRequester.requestFocus()
                     schoolError -> schoolFocusRequester.requestFocus()
                     phoneErrorInvalid || phoneErrorNotRegistered -> phoneFocusRequester.requestFocus()
+                    else -> otpFocusRequester.requestFocus()
                 }
             }
         )
@@ -448,13 +452,12 @@ fun DriverSignupScreen(
                     } else {
                         signupViewModel.setOtpValid(false)
                         showOtpErrorMessage = true
-                        // Clear the OTP boxes after a short delay so the user sees the error
+
                         scope.launch {
                             delay(1000)
                             repeat(Constants.OTP_LENGTH) { index ->
                                 signupViewModel.onOtpDigitChange(index, "")
                             }
-                            // Reset focus only if we are still on this screen
                             focusManager.clearFocus()
                             delay(50)
                             otpFocusRequester.requestFocus()
@@ -464,15 +467,15 @@ fun DriverSignupScreen(
                     showOtpErrorMessage = false
                 }
             },
-
             keyboardController = keyboardController,
-            focusManager = focusManager, // NEW ARGUMENT
-            onClearError = {},
+            focusManager = focusManager,
+            onClearError = {
+                showOtpErrorMessage = false
+            },
             onAutoVerify = {},
             isSending = uiState.isOtpSubmitting,
             focusRequester = otpFocusRequester
         )
-
         Spacer(modifier = Modifier.height(12.dp))
 
         val isOtpValid by signupViewModel.isOtpValid.collectAsState()
@@ -622,7 +625,12 @@ fun DriverSignupOtpInputRow(
                     textStyle = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
                     modifier = Modifier
                         .size(50.dp)
-                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier),
+                        .then(if (index == 0) Modifier.focusRequester(focusRequester) else Modifier)
+                        .onFocusChanged { focusState ->
+                            if (focusState.isFocused) {
+                                onClearError()
+                            }
+                        },
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Number,
                         imeAction = if (index == Constants.OTP_LENGTH - 1) ImeAction.Done else ImeAction.Next
