@@ -316,6 +316,22 @@ class SignUpViewModel : ViewModel() {
                 _isPhoneAllowed.value = false
             }
     }
+
+    fun saveParentAndChildren(
+        parentName: String,
+        childrenNames: List<String>,
+        context: Context
+    ) {
+        // Example: Save parent node
+        val parentRef = FirebaseFirestore.getInstance().collection("parents").document(parentName)
+        val data = hashMapOf(
+            "parentName" to parentName,
+            "children" to childrenNames
+        )
+        parentRef.set(data)
+            .addOnSuccessListener { Log.d("🔥", "Parent saved") }
+            .addOnFailureListener { e -> Log.e("🔥", "Failed to save parent", e) }
+    }
     fun onRememberMeChange(checked: Boolean) {
         _uiState.value = _uiState.value.copy(rememberMe = checked)
     }

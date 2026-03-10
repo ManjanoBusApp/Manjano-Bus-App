@@ -78,7 +78,8 @@ import java.nio.charset.StandardCharsets
 import com.manjano.bus.models.Country
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
-
+import com.manjano.bus.viewmodel.ParentSignupViewModel
+import androidx.lifecycle.viewmodel.compose.viewModel
 
 
 
@@ -170,6 +171,7 @@ fun SignupScreen(
     navController: NavController,
     signupViewModel: SignUpViewModel = viewModel()
 ) {
+    val parentSignupViewModel: ParentSignupViewModel = viewModel()
     val appPurple = Color(0xFF800080)
     val uiState by signupViewModel.uiState.collectAsState()
 
@@ -517,17 +519,6 @@ fun SignupScreen(
                 // phoneFocusRequester.requestFocus()
             }
         }
-        // NEW: Call Firestore check when phoneNumber changes
-        LaunchedEffect(phoneNumber) {
-            if (phoneNumber.isNotBlank()) {
-                signupViewModel.checkPhoneNumberInFirestore(
-                    phone = phoneNumber,
-                    countryIso = selectedCountry.isoCode
-                )
-            } else {
-                signupViewModel.resetPhoneAllowed()
-            }
-        }
 
         // NEW: Call Firestore check when phoneNumber changes
         LaunchedEffect(phoneNumber) {
@@ -561,19 +552,20 @@ fun SignupScreen(
                 keyboardController?.hide()
 
                 scope.launch {
-                    // --- FIX: hide previous incorrect OTP message ---
-                    showOtpErrorMessage = false  // ← Reset here
+                    // --- Step 1: Reset previous OTP error message ---
+                    showOtpErrorMessage = false
 
-                    // Call Firestore check if not already done
+                    // --- Step 2: Ensure Firestore phone check is done ---
                     if (phoneNumber.isNotBlank() && isPhoneAllowed == null) {
                         signupViewModel.checkPhoneNumberInFirestore(
                             phone = phoneNumber,
                             countryIso = selectedCountry.isoCode
                         )
+                        // Small delay to allow result
                         delay(500)
                     }
 
-                    // Validate other fields
+                    // --- Step 3: Validate all fields ---
                     parentError = parentName.text.isEmpty()
 
                     hasTouchedChild = List(childrenNames.size) { true }
@@ -582,43 +574,42 @@ fun SignupScreen(
                     val hasEmptyChild = childErrors.any { it }
                     studentError = hasEmptyChild
 
+                    hasTouchedEmail = true
                     emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
                         .matches()
 
-                    // Reset phone states
+                    // --- Step 4: Reset phone error UI ---
                     phoneError = false
                     phoneErrorText = ""
 
-                    // ONLY check Firestore result for phone error
+                    // --- Step 5: Only allow Firestore-authorized numbers ---
                     val phoneNotAllowed = isPhoneAllowed != true
-
                     if (phoneNotAllowed) {
                         phoneErrorText = "Can't proceed, contact the school"
                         phoneError = true
                     }
 
-                    // Overall validity check
+                    // --- Step 6: Overall validity check ---
                     val canProceed =
                         !parentError && !hasEmptyChild && !emailError && !phoneNotAllowed
 
                     if (canProceed) {
-                        // Proceed to OTP
+                        // --- Step 7: Request OTP (only once) ---
                         signupViewModel.requestOtp()
                         showOtpMessage = true
+
                         delay(100)
                         if (scrollState.maxValue > 0) {
                             otpFocusRequester.requestFocus()
                             scrollState.animateScrollTo(scrollState.maxValue)
                         }
                     } else {
-                        // Focus first invalid field
+                        // --- Step 8: Focus first invalid field ---
                         when {
                             parentError -> parentFocusRequester.requestFocus()
                             hasEmptyChild -> {
                                 val firstEmpty = childErrors.indexOfFirst { it }
-                                if (firstEmpty >= 0 && firstEmpty == 0) {
-                                    studentFocusRequester.requestFocus()
-                                }
+                                if (firstEmpty >= 0) studentFocusRequester.requestFocus()
                             }
                             emailError -> emailFocusRequester.requestFocus()
                             phoneNotAllowed -> phoneFocusRequester.requestFocus()
@@ -707,11 +698,10 @@ fun SignupScreen(
                 childrenNames.all { it.text.isNotEmpty() } &&
                 email.text.isNotEmpty() &&
                 Patterns.EMAIL_ADDRESS.matcher(email.text).matches() &&
-                phoneErrorText.isEmpty() &&
-                isPhoneAllowed == true &&                        // Phone must exist in Firestore
-                uiState.otpDigits.size == Constants.OTP_LENGTH && // OTP fully entered
-                uiState.otpDigits.all { it.isNotBlank() } &&      // All OTP digits filled
-                isOtpValid                                        // OTP is correct
+                phoneErrorText.isEmpty() &&        // <-- use local phone validation
+                uiState.otpDigits.size == Constants.OTP_LENGTH &&
+                uiState.otpDigits.all { it.isNotBlank() } &&
+                isOtpValid                               // OTP is correct
 
         Button(
             onClick = {
@@ -745,21 +735,17 @@ fun SignupScreen(
                     // Clear previous phone error
                     phoneErrorText = ""
 
-                    // Check format first - show "Invalid phone number" if bad
-                    if (!isFormatValid || !isCompleteEnough) {
+                    // Local phone validation only
+                    if (!PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                        || phoneNumber.isBlank()
+                        || phoneNumber.length < 8
+                    ) {
                         phoneErrorText = "Invalid phone number"
                         phoneFocusRequester.requestFocus()
                         return@launch
                     }
 
-                    // Only if format is good, check Firestore
-                    if (isPhoneAllowed != true) {
-                        phoneErrorText = "Can't proceed, contact the school"
-                        phoneFocusRequester.requestFocus()
-                        return@launch
-                    }
-
-                    // All phone OK — now validate other fields
+// Continue with parent/children/email validation as usual
                     parentError = parentName.text.isEmpty()
                     hasTouchedChild = List(childrenNames.size) { true }
                     childErrors =
@@ -773,62 +759,46 @@ fun SignupScreen(
                     val canProceed = !parentError && !hasEmptyChild && !emailError
 
                     if (canProceed) {
-                        val enteredOtp = uiState.otpDigits.joinToString("")
-                        val isTestOtp = enteredOtp == Constants.TEST_OTP
+                        Log.d("🔥", "Continue clicked - saving parent & children in Firebase")
 
-                        if (isTestOtp) {
-                            Log.d(
-                                "🔥",
-                                "TEST OTP used – initiating saveUserNames for Firebase setup."
-                            )
+                        val childrenCsv = childrenNames.joinToString(",") { it.text }
 
-                            signupViewModel.saveUserNames(
-                                parentName.text,
-                                childrenNames.joinToString(",") { it.text },
-                                context
-                            )
+                        parentSignupViewModel.saveParentAndChildren(
+                            parentName = parentName.text,
+                            childrenNames = childrenCsv,
+                            context = context
+                        )
 
-                            val prefs =
-                                context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
-                            prefs.edit().apply {
-                                putString("parent_name", parentName.text)
-                                putString(
-                                    "children_names",
-                                    childrenNames.joinToString(",") { it.text })
-                            }.apply()
+                        val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                        prefs.edit().apply {
+                            putString("parent_name", parentName.text)
+                            putString("children_names", childrenNames.joinToString(",") { it.text })
+                        }.apply()
 
-                            val encodedParent = URLEncoder.encode(
-                                parentName.text,
-                                StandardCharsets.UTF_8.toString()
-                            )
-                            val encodedChildren = URLEncoder.encode(
-                                childrenNames.joinToString(",") { it.text },
-                                StandardCharsets.UTF_8.toString()
-                            )
-                            val encodedStatus =
-                                URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
-                            navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
-                                popUpTo("signup") { inclusive = true }
-                            }
-                        } else {
-                            // Real OTP flow (leave empty or add later)
+                        val encodedParent =
+                            URLEncoder.encode(parentName.text, StandardCharsets.UTF_8.toString())
+                        val encodedChildren = URLEncoder.encode(
+                            childrenNames.joinToString(",") { it.text },
+                            StandardCharsets.UTF_8.toString()
+                        )
+                        val encodedStatus =
+                            URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
+                        navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
+                            popUpTo("signup") { inclusive = true }
                         }
                     } else {
-                        // Focus first invalid field
                         when {
                             parentError -> parentFocusRequester.requestFocus()
                             hasEmptyChild -> {
                                 val firstEmpty = childErrors.indexOfFirst { it }
-                                if (firstEmpty >= 0) {
-                                    studentFocusRequester.requestFocus()
-                                }
+                                if (firstEmpty >= 0) studentFocusRequester.requestFocus()
                             }
                             emailError -> emailFocusRequester.requestFocus()
                         }
                     }
                 }
-            },
-            enabled = isFormValid,
+            }, // <-- IMPORTANT: comma here, closes onClick lambda
+            enabled = isFormValid && phoneErrorText.isEmpty(),
             modifier = Modifier
                 .fillMaxWidth()
                 .offset(x = continueShakeOffset.floatValue.dp),
@@ -839,7 +809,6 @@ fun SignupScreen(
         ) {
             Text("Continue", color = Color.White, fontSize = 16.sp)
         }
-
         Spacer(modifier = Modifier.height(12.dp))
 
 
