@@ -61,23 +61,69 @@ class DriverDashboardViewModel @Inject constructor(
 
     // ------------------- FETCH DRIVER NAME IN REALTIME -------------------
     fun fetchDriverNameRealtime(phoneNumber: String) {
-        val normalizedPhone = if (phoneNumber.startsWith("7")) "0$phoneNumber" else phoneNumber
+        var normalizedPhone =
+            phoneNumber.trim().replace("[^+0-9]".toRegex(), "")  // remove any non-digits except +
+
+        // Handle common Kenyan input variations → convert to 10-digit with leading 0
+        // This only affects the READ path – signup/validation remains untouched
+        when {
+            normalizedPhone.length == 9 && normalizedPhone.startsWith("7") -> {
+                normalizedPhone = "0$normalizedPhone"           // 777000000 → 0777000000
+            }
+
+            normalizedPhone.length == 9 && normalizedPhone.startsWith("1") -> {
+                normalizedPhone = "0$normalizedPhone"           // 111123456 → 0111123456
+            }
+
+            normalizedPhone.startsWith("254") && normalizedPhone.length == 12 -> {
+                normalizedPhone = "0" + normalizedPhone.substring(3)   // 254777000000 → 0777000000
+            }
+
+            normalizedPhone.startsWith("+254") && normalizedPhone.length == 13 -> {
+                normalizedPhone = "0" + normalizedPhone.substring(4)   // +254777000000 → 0777000000
+            }
+            // If already 10 digits with leading 0 or 1 → keep as is
+            else -> { /* no change needed */
+            }
+        }
+
+        android.util.Log.d(
+            "NameFixDebug",
+            "fetchDriverNameRealtime | raw: '$phoneNumber' → normalized doc ID: '$normalizedPhone'"
+        )
 
         firestore.collection("drivers")
-            .document(normalizedPhone)
-            .addSnapshotListener { snapshot, error ->
+            .whereEqualTo("mobileNumber", normalizedPhone)
+            .addSnapshotListener { snapshots, error ->
                 if (error != null) {
-                    android.util.Log.e("DriverDashboardVM", "Error fetching driver name", error)
+                    android.util.Log.e("NameFixDebug", "Listener ERROR: ${error.message}", error)
                     return@addSnapshotListener
                 }
 
-                snapshot?.getString("name")?.let { fullName ->
-                    // Take first name for greeting
-                    _driverFirstName.value = fullName.split(" ").firstOrNull() ?: fullName
+                if (snapshots == null || snapshots.isEmpty) {
+                    android.util.Log.w(
+                        "NameFixDebug",
+                        "No driver found with mobileNumber: $normalizedPhone"
+                    )
+                    return@addSnapshotListener
                 }
+
+                val doc = snapshots.documents.first()
+
+                val fullName = doc.getString("name") ?: ""
+                android.util.Log.d("NameFixDebug", "Driver found | name = '$fullName'")
+
+                val firstName =
+                    fullName.trim().split("\\s+".toRegex()).firstOrNull() ?: fullName.trim()
+
+                _driverFirstName.value = firstName
+
+                android.util.Log.d("NameFixDebug", "State updated: driverFirstName = '$firstName'")
+
+                _driverFirstName.value = firstName
+                android.util.Log.d("NameFixDebug", "State updated: driverFirstName = '$firstName'")
             }
     }
-
     // ------------------- UPDATE LAST LOGIN -------------------
     fun updateLastLogin(phoneNumber: String) {
         val db = FirebaseFirestore.getInstance()

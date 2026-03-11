@@ -78,6 +78,10 @@ fun DriverDashboardScreen(
 
     // Set the logged-in driver phone number once
     LaunchedEffect(driverPhoneNumber) {
+        android.util.Log.d(
+            "NameFixDebug",
+            "Dashboard LaunchedEffect | driverPhoneNumber arg received: '$driverPhoneNumber'"
+        )
         viewModel.setLoggedInDriverPhoneNumber(driverPhoneNumber)
         viewModel.fetchDriverNameRealtime(driverPhoneNumber)
     }
@@ -169,8 +173,6 @@ fun DashboardContent(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                val driverFirstName by viewModel.driverFirstName.collectAsState()
-
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -178,10 +180,6 @@ fun DashboardContent(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-
-                    // Left: Hello XXX 👋 (reactive)
-                    val driverFirstName by viewModel.driverFirstName.collectAsState()
-
                     Text(
                         text = if (driverFirstName.isNotBlank()) "👋 Sasa $driverFirstName" else "👋 Sasa",
                         style = MaterialTheme.typography.bodyLarge,
@@ -189,7 +187,6 @@ fun DashboardContent(
                         color = Color.Black
                     )
 
-                    // Right: Sign Out
                     Text(
                         text = "Sign Out",
                         fontSize = 15.sp,
