@@ -210,26 +210,27 @@ fun ParentDashboardScreen(
                             // Get current data to migrate
                             rootRef.child("parents").child(parentKey).child("children").child(key)
                                 .get().addOnSuccessListener { snapshot ->
-                                val currentData = snapshot.value as? Map<String, Any> ?: emptyMap()
-                                val newData = currentData.toMutableMap()
-                                newData["displayName"] = displayName
-                                newData["childId"] = expectedKey
+                                    val currentData =
+                                        snapshot.value as? Map<String, Any> ?: emptyMap()
+                                    val newData = currentData.toMutableMap()
+                                    newData["displayName"] = displayName
+                                    newData["childId"] = expectedKey
 
-                                val updates = mutableMapOf<String, Any?>()
-                                // Remove old nodes
-                                updates["parents/$parentKey/children/$key"] = null
-                                updates["students/$key"] = null
+                                    val updates = mutableMapOf<String, Any?>()
+                                    // Remove old nodes
+                                    updates["parents/$parentKey/children/$key"] = null
+                                    updates["students/$key"] = null
 
-                                // Create new nodes
-                                updates["parents/$parentKey/children/$expectedKey"] = newData
-                                updates["students/$expectedKey"] = newData
+                                    // Create new nodes
+                                    updates["parents/$parentKey/children/$expectedKey"] = newData
+                                    updates["students/$expectedKey"] = newData
 
-                                rootRef.updateChildren(updates).addOnSuccessListener {
-                                    Log.d("🔥", "Successfully migrated $key to $expectedKey")
-                                    // Trigger a storage re-scan for the new name
-                                    viewModel.monitorStorageForChildImage(expectedKey)
+                                    rootRef.updateChildren(updates).addOnSuccessListener {
+                                        Log.d("🔥", "Successfully migrated $key to $expectedKey")
+                                        // Trigger a storage re-scan for the new name
+                                        viewModel.monitorStorageForChildImage(expectedKey)
+                                    }
                                 }
-                            }
                         }
                     }
                 }
@@ -1022,4 +1023,3 @@ fun ParentDashboardScreen(
             }
         })
 }
-
