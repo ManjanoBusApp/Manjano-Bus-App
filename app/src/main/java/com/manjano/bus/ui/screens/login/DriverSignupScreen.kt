@@ -512,7 +512,21 @@ fun DriverSignupScreen(
                     uiState.otpDigits.joinToString("") == Constants.TEST_OTP &&
                     isPhoneAllowed == true
                 ) {
-                    navController.navigate("driver_dashboard") {
+
+                    signupViewModel.saveDriverProfileIfNeeded(
+                        phoneNumber = phoneNumber,
+                        fullName = driverName.text,
+                        nationalId = idNumber.text,
+                        schoolName = schoolName.text,
+                        countryIso = selectedCountry.isoCode
+                    )
+
+                    // Before navigating, set the logged-in driver's phone number in the ViewModel
+                    // Pass the phone number as a navigation argument instead of calling setLoggedInDriverPhoneNumber here
+                    // Encode driverName to safely pass via URL
+                    val encodedDriverName = java.net.URLEncoder.encode(driverName.text, "UTF-8")
+
+                    navController.navigate("driver_dashboard/$phoneNumber/$encodedDriverName") {
                         popUpTo("driver_signup") { inclusive = true }
                     }
                 } else if (isPhoneAllowed == false) {

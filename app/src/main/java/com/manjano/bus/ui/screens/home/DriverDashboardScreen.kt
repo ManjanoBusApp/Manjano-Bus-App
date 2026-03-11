@@ -65,14 +65,23 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.hilt.navigation.compose.hiltViewModel
 
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun DriverDashboardScreen(
     navController: NavHostController,
-    viewModel: DriverDashboardViewModel
+    driverPhoneNumber: String
 ) {
+    val viewModel: DriverDashboardViewModel = hiltViewModel()
+
+    // Set the logged-in driver phone number once
+    LaunchedEffect(driverPhoneNumber) {
+        viewModel.setLoggedInDriverPhoneNumber(driverPhoneNumber)
+        viewModel.fetchDriverNameRealtime(driverPhoneNumber)
+    }
+
     val locationPermissionState = rememberMultiplePermissionsState(
         listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -84,38 +93,38 @@ fun DriverDashboardScreen(
         locationPermissionState.launchMultiplePermissionRequest()
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.Black)
-    ) {
-        if (locationPermissionState.allPermissionsGranted) {
-            DashboardContent(navController, viewModel)
-        } else if (locationPermissionState.shouldShowRationale) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.Center
+    if (locationPermissionState.allPermissionsGranted) {
+        // DashboardContent reads driverFirstName reactively from ViewModel
+        DashboardContent(
+            navController = navController,
+            viewModel = viewModel
+        )
+    } else if (locationPermissionState.shouldShowRationale) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = "Location access is required to track the bus and use the dashboard.",
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyLarge
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+            Button(
+                onClick = { locationPermissionState.launchMultiplePermissionRequest() },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF800080))
             ) {
-                Text(
-                    text = "Location access is required to track the bus and use the dashboard.",
-                    color = Color.White,
-                    textAlign = TextAlign.Center,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-                Button(
-                    onClick = { locationPermissionState.launchMultiplePermissionRequest() },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF800080))
-                ) {
-                    Text("Enable Permissions", color = Color.White)
-                }
+                Text("Enable Permissions", color = Color.White)
             }
         }
     }
 }
+
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -125,6 +134,7 @@ fun DashboardContent(
 ) {
     val isTracking by viewModel.isTracking.collectAsState()
     val students by viewModel.studentList.collectAsState()
+    val driverFirstName by viewModel.driverFirstName.collectAsState() // collect from ViewModel
     val beijingRoad = LatLng(-1.3815977, 36.9395961)
     val context = LocalContext.current
 
@@ -159,21 +169,37 @@ fun DashboardContent(
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp)
             ) {
-                // Sign Out pinned at the top
-                Text(
-                    text = "Sign Out",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.Black,
+                val driverFirstName by viewModel.driverFirstName.collectAsState()
+
+                Row(
                     modifier = Modifier
-                        .align(Alignment.End)
-                        .padding(bottom = 2.dp)
-                        .clickable {
-                            // Simple navigation to Welcome screen
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+
+                    // Left: Hello XXX 👋 (reactive)
+                    val driverFirstName by viewModel.driverFirstName.collectAsState()
+
+                    Text(
+                        text = if (driverFirstName.isNotBlank()) "👋 Sasa $driverFirstName" else "👋 Sasa",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Black
+                    )
+
+                    // Right: Sign Out
+                    Text(
+                        text = "Sign Out",
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Red,
+                        modifier = Modifier.clickable {
                             navController.navigate("welcome")
                         }
-                )
-
+                    )
+                }
                 HorizontalDivider(
                     modifier = Modifier
                         .fillMaxWidth()

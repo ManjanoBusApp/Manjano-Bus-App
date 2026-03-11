@@ -8,6 +8,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import javax.inject.Inject
+import com.google.firebase.firestore.FirebaseFirestore
+import kotlinx.coroutines.flow.StateFlow
 
 data class Student(
     val childId: String = "",
@@ -19,6 +21,7 @@ data class Student(
     val photoUrl: String = "",
     val fingerprintId: Int? = null
 )
+
 @HiltViewModel
 class DriverDashboardViewModel @Inject constructor(
     private val fusedLocationClient: FusedLocationProviderClient,
@@ -38,6 +41,55 @@ class DriverDashboardViewModel @Inject constructor(
         fetchAssignedStudents()
     }
 
+    // ------------------- MOBILE NUMBER ERROR STATE -------------------
+    private val _mobileNumberError = MutableStateFlow<String?>(null)
+    val mobileNumberError: StateFlow<String?> = _mobileNumberError.asStateFlow()
+
+    // ------------------- DRIVER FIRST NAME STATE -------------------
+    private val firestore = FirebaseFirestore.getInstance()
+
+    private val _driverFirstName = MutableStateFlow("")
+    val driverFirstName: StateFlow<String> = _driverFirstName
+
+    // ------------------- CURRENT LOGGED-IN DRIVER PHONE -------------------
+    var loggedInDriverPhoneNumber: String? = null
+        private set
+
+    fun setLoggedInDriverPhoneNumber(phone: String) {
+        loggedInDriverPhoneNumber = if (phone.startsWith("7")) "0$phone" else phone
+    }
+
+    // ------------------- FETCH DRIVER NAME IN REALTIME -------------------
+    fun fetchDriverNameRealtime(phoneNumber: String) {
+        val normalizedPhone = if (phoneNumber.startsWith("7")) "0$phoneNumber" else phoneNumber
+
+        firestore.collection("drivers")
+            .document(normalizedPhone)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    android.util.Log.e("DriverDashboardVM", "Error fetching driver name", error)
+                    return@addSnapshotListener
+                }
+
+                snapshot?.getString("name")?.let { fullName ->
+                    // Take first name for greeting
+                    _driverFirstName.value = fullName.split(" ").firstOrNull() ?: fullName
+                }
+            }
+    }
+
+    // ------------------- UPDATE LAST LOGIN -------------------
+    fun updateLastLogin(phoneNumber: String) {
+        val db = FirebaseFirestore.getInstance()
+        db.collection("drivers")
+            .document(phoneNumber)
+            .update("lastLogin", System.currentTimeMillis())
+            .addOnFailureListener { e ->
+                android.util.Log.e("DriverDashboardVM", "Error updating lastLogin", e)
+            }
+    }
+
+    // ------------------- TRACKING STATE -------------------
     private val _isTracking = MutableStateFlow(false)
     val isTracking = _isTracking.asStateFlow()
 
@@ -57,6 +109,7 @@ class DriverDashboardViewModel @Inject constructor(
         }
     }
 
+    // ------------------- MARK STUDENT BOARDING -------------------
     fun markStudentAsBoarded(studentId: String) {
         database.child("students").child(studentId).child("status").setValue("Boarded")
     }
@@ -81,13 +134,13 @@ class DriverDashboardViewModel @Inject constructor(
         fetchAssignedStudents()
     }
 
+    // ------------------- FETCH STUDENTS -------------------
     private fun fetchAssignedStudents() {
         database.child("students")
             .addValueEventListener(object : com.google.firebase.database.ValueEventListener {
                 override fun onDataChange(snapshot: com.google.firebase.database.DataSnapshot) {
                     val list = snapshot.children.mapNotNull { child ->
                         val student = child.getValue(Student::class.java) ?: return@mapNotNull null
-                        // Fix encoded parent name: replace + with space (from URL encoding)
                         student.copy(parentName = student.parentName.replace("+", " "))
                     }
                     _studentList.value = list
@@ -99,27 +152,7 @@ class DriverDashboardViewModel @Inject constructor(
             })
     }
 
-    private fun seedDatabaseWithStudents() {
-        val busIds = (1..10).map { "bus_${it.toString().padStart(3, '0')}" }
-        val stops = listOf("Beijing Road", "Mombasa Road", "Westlands", "Kilimani")
-
-        for (i in 1..100) {
-            val studentId = "stu_${i.toString().padStart(4, '0')}"
-            val assignedBus = if (i <= 10) "bus_001" else busIds.random()
-
-            val studentData = mapOf(
-                "id" to studentId,
-                "name" to "Student $i",
-                "stop" to stops.random(),
-                "status" to "Waiting",
-                "busAssigned" to assignedBus,
-                "fingerprintId" to i
-            )
-
-            database.child("students").child(studentId).setValue(studentData)
-        }
-    }
-
+    // ------------------- TRACKING LOCATION -------------------
     @SuppressLint("MissingPermission")
     fun toggleTracking() {
         _isTracking.value = !_isTracking.value
@@ -130,6 +163,7 @@ class DriverDashboardViewModel @Inject constructor(
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
     }
+
     fun simulateBoarding(studentId: String, studentName: String) {
         markStudentAsBoarded(studentId)
         tts?.speak(
@@ -145,5 +179,69 @@ class DriverDashboardViewModel @Inject constructor(
         fusedLocationClient.removeLocationUpdates(locationCallback)
         tts?.stop()
         tts?.shutdown()
+    }
+
+    // ------------------- SAVE DRIVER PROFILE (SIGNUP) -------------------
+    fun saveDriverProfileIfNeeded(
+        phoneNumber: String,
+        fullName: String,
+        nationalId: String,
+        schoolName: String,
+        onAlreadyRegistered: () -> Unit = {}
+    ) {
+        val db = FirebaseFirestore.getInstance()
+
+        // Mobile number = Firestore document ID
+        val normalizedPhone = if (phoneNumber.startsWith("7")) "0$phoneNumber" else phoneNumber
+        val docRef = db.collection("drivers").document(normalizedPhone)
+
+        docRef.get()
+            .addOnSuccessListener { snapshot ->
+
+                if (!snapshot.exists()) {
+                    // Mobile number not recognized by admin → prevent signup
+                    _mobileNumberError.value = "Mobile number not recognized"
+                    return@addOnSuccessListener
+                }
+
+                val existingName = snapshot.getString("name")
+                if (!existingName.isNullOrBlank()) {
+                    // Already signed up → reject
+                    _driverFirstName.value = ""
+                    onAlreadyRegistered()
+                    _mobileNumberError.value = "Already registered, go to signin instead"
+                    return@addOnSuccessListener
+                }
+
+                // Prepare timestamps
+                val createdAt = System.currentTimeMillis()
+                val createdAtDateTime = java.text.SimpleDateFormat(
+                    "hh:mm a, dd MMM yyyy",
+                    java.util.Locale.getDefault()
+                ).format(java.util.Date(createdAt))
+
+                // Write fields for first-time signup
+                val updates = mapOf(
+                    "name" to fullName,
+                    "nationalId" to nationalId,
+                    "schoolName" to schoolName,
+                    "createdAt" to createdAt,
+                    "createdAtDateTime" to createdAtDateTime
+                )
+
+                docRef.update(updates)
+                    .addOnSuccessListener {
+                        val firstName = fullName.split(" ").firstOrNull() ?: fullName
+                        _driverFirstName.value = firstName
+                        _mobileNumberError.value = null
+                        android.util.Log.d("DriverDashboardVM", "Driver profile saved successfully")
+                    }
+                    .addOnFailureListener { e ->
+                        android.util.Log.e("DriverDashboardVM", "Failed to save driver profile", e)
+                    }
+            }
+            .addOnFailureListener { e ->
+                android.util.Log.e("DriverDashboardVM", "Firestore query failed", e)
+            }
     }
 }

@@ -48,6 +48,9 @@ class SignUpViewModel : ViewModel() {
     private val _isOtpValid = MutableStateFlow(false)
     val isOtpValid: StateFlow<Boolean> get() = _isOtpValid
 
+    private val _driverFirstName = MutableStateFlow("")
+    val driverFirstName: StateFlow<String> = _driverFirstName
+
 
     private val database = FirebaseDatabase.getInstance().reference
     private val firestore = FirebaseFirestore.getInstance()
@@ -316,7 +319,62 @@ class SignUpViewModel : ViewModel() {
                 _isPhoneAllowed.value = false
             }
     }
+    fun saveDriverProfileIfNeeded(
+        phoneNumber: String,
+        fullName: String,
+        nationalId: String,
+        schoolName: String,
+        countryIso: String
+    ) {
+        val normalizedPhone = normalizePhoneNumber(phoneNumber, countryIso)
 
+        firestore.collection("drivers")
+            .get()
+            .addOnSuccessListener { snapshot ->
+
+                val matchingDoc = snapshot.documents.firstOrNull { doc ->
+                    val dbNumber = doc.getString("mobileNumber")?.filter { it.isDigit() } ?: ""
+                    val inputNumber = normalizedPhone.filter { it.isDigit() }
+                    dbNumber == inputNumber
+                }
+
+                if (matchingDoc != null) {
+
+                    val existingName = matchingDoc.getString("name")
+
+                    // Only write if the profile was not filled before
+                    if (existingName.isNullOrBlank()) {
+
+                        firestore.collection("drivers")
+                            .document(matchingDoc.id)
+                            .update(
+                                mapOf(
+                                    "name" to fullName,
+                                    "nationalId" to nationalId,
+                                    "schoolName" to schoolName,
+                                    "createdAt" to System.currentTimeMillis()
+                                )
+                            )
+                            .addOnSuccessListener {
+                                Log.d("🔥", "Driver profile saved successfully")
+                            }
+                            .addOnFailureListener {
+                                Log.e("🔥", "Failed to save driver profile", it)
+                            }
+
+                    } else {
+                        Log.d("🔥", "Driver profile already exists, skipping write")
+                    }
+
+                } else {
+                    Log.e("🔥", "No matching driver document found for phone")
+                }
+
+            }
+            .addOnFailureListener {
+                Log.e("🔥", "Firestore query failed", it)
+            }
+    }
     fun saveParentAndChildren(
         parentName: String,
         childrenNames: List<String>,

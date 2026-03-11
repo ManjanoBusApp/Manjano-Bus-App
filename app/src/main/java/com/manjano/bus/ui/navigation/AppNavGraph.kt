@@ -110,11 +110,20 @@ fun AppNavGraph(navController: NavHostController) {
         }
 
         // Driver Dashboard
-        composable("driver_dashboard") { _: NavBackStackEntry ->
+        composable(
+            route = "driver_dashboard/{driverPhoneNumber}/{driverName}",
+            arguments = listOf(
+                navArgument("driverPhoneNumber") { type = NavType.StringType },
+                navArgument("driverName") { type = NavType.StringType }
+            )
+        ) { backStackEntry ->
+            val driverPhoneNumber = backStackEntry.arguments?.getString("driverPhoneNumber") ?: ""
+            val driverNameEncoded = backStackEntry.arguments?.getString("driverName") ?: ""
+            val driverName = URLDecoder.decode(driverNameEncoded, StandardCharsets.UTF_8.toString())
             val driverViewModel: DriverDashboardViewModel = hiltViewModel()
             DriverDashboardScreen(
                 navController = navController,
-                viewModel = driverViewModel
+                driverPhoneNumber = driverPhoneNumber,
             )
         }
 
