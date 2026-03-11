@@ -19,7 +19,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import com.manjano.bus.models.CountryRepository
 import com.manjano.bus.models.Country
-
+import kotlinx.coroutines.flow.asStateFlow
 
 private fun sanitizeKey(name: String): String =
     name.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
@@ -51,7 +51,12 @@ class SignUpViewModel : ViewModel() {
     private val _driverFirstName = MutableStateFlow("")
     val driverFirstName: StateFlow<String> = _driverFirstName
 
+    private val _alreadyRegisteredError = MutableStateFlow<String?>(null)
+    val alreadyRegisteredError: StateFlow<String?> = _alreadyRegisteredError.asStateFlow()
 
+    fun setAlreadyRegisteredError(message: String?) {
+        _alreadyRegisteredError.value = message
+    }
     private val database = FirebaseDatabase.getInstance().reference
     private val firestore = FirebaseFirestore.getInstance()
 
@@ -412,15 +417,35 @@ class SignUpViewModel : ViewModel() {
         db.collection("drivers")
             .get()
             .addOnSuccessListener { snapshot ->
-                val matched = snapshot.documents.any { doc ->
+                val matchingDoc = snapshot.documents.firstOrNull { doc ->
                     val dbNumber = doc.getString("mobileNumber")?.filter { it.isDigit() } ?: ""
                     val inputNumber = normalizedInput.filter { it.isDigit() }
                     dbNumber == inputNumber
                 }
-                _isPhoneAllowed.value = matched
+
+                if (matchingDoc != null) {
+                    _isPhoneAllowed.value = true  // phone exists in Firestore
+
+                    // Only show "You're registered..." if driver has signed up before
+                    val hasSignedUp = matchingDoc.getBoolean("hasSignedUp") ?: false
+                    val hasName = !matchingDoc.getString("name").isNullOrBlank()
+
+                    if (hasSignedUp || hasName) {
+                        setAlreadyRegisteredError("You’re registered, please Sign-in")
+                    } else {
+                        // First-time signup → no error
+                        setAlreadyRegisteredError(null)
+                    }
+
+                } else {
+                    // Phone not found → block Send Code
+                    _isPhoneAllowed.value = false
+                    setAlreadyRegisteredError(null)
+                }
             }
             .addOnFailureListener {
                 _isPhoneAllowed.value = false
+                setAlreadyRegisteredError(null)
             }
     }
 }

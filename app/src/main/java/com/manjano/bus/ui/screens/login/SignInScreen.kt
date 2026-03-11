@@ -124,24 +124,41 @@ fun SignInScreen(
 
     LaunchedEffect(uiState.navigateToDashboard) {
         if (uiState.navigateToDashboard) {
-            if (role == "driver") {
-                navController.navigate("driver_dashboard") {
-                    popUpTo("signin/driver") { inclusive = true }
+
+            runCatching {
+
+                if (role == "driver") {
+                    val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                    val driverName = prefs.getString("driver_name", "") ?: "Driver"
+                    val driverPhone = prefs.getString("driver_phone", "") ?: ""
+
+                    val encodedDriverName =
+                        URLEncoder.encode(driverName, StandardCharsets.UTF_8.toString())
+                    navController.navigate("driver_dashboard/$driverPhone/$encodedDriverName") {
+                        popUpTo("signin/driver") { inclusive = true }
+                    }
+
+                } else if (role == "parent") {
+                    val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
+                    val parentName = prefs.getString("parent_name", "") ?: ""
+                    val childrenNames = prefs.getString("children_names", "") ?: ""
+                    val parentFirstName = parentName.split(" ").firstOrNull() ?: parentName
+
+                    val encodedParent =
+                        URLEncoder.encode(parentFirstName, StandardCharsets.UTF_8.toString())
+                    val encodedChildren =
+                        URLEncoder.encode(childrenNames, StandardCharsets.UTF_8.toString())
+                    val encodedStatus =
+                        URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
+
+                    navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
+                        popUpTo("signin/parent") { inclusive = true }
+                    }
                 }
-            } else if (role == "parent") {
-                val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
-                val parentName = prefs.getString("parent_name", "") ?: ""
-                val childrenNames = prefs.getString("children_names", "") ?: ""
-                val parentFirstName = parentName.split(" ").firstOrNull() ?: parentName
-                val encodedParent =
-                    URLEncoder.encode(parentFirstName, StandardCharsets.UTF_8.toString())
-                val encodedChildren =
-                    URLEncoder.encode(childrenNames, StandardCharsets.UTF_8.toString())
-                val encodedStatus = URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
-                navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
-                    popUpTo("signin/parent") { inclusive = true }
-                }
+            }.onFailure { throwable ->
+                android.util.Log.e("NavigationError", "Failed to navigate to dashboard", throwable)
             }
+
             viewModel.onNavigationConsumed()
         }
     }

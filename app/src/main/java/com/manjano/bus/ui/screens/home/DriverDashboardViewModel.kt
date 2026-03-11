@@ -50,7 +50,8 @@ class DriverDashboardViewModel @Inject constructor(
 
     private val _driverFirstName = MutableStateFlow("")
     val driverFirstName: StateFlow<String> = _driverFirstName
-
+    private val _alreadyRegisteredError = MutableStateFlow<String?>(null)
+    val alreadyRegisteredError: StateFlow<String?> = _alreadyRegisteredError.asStateFlow()
     // ------------------- CURRENT LOGGED-IN DRIVER PHONE -------------------
     var loggedInDriverPhoneNumber: String? = null
         private set
@@ -236,43 +237,45 @@ class DriverDashboardViewModel @Inject constructor(
         onAlreadyRegistered: () -> Unit = {}
     ) {
         val db = FirebaseFirestore.getInstance()
-
-        // Mobile number = Firestore document ID
         val normalizedPhone = if (phoneNumber.startsWith("7")) "0$phoneNumber" else phoneNumber
         val docRef = db.collection("drivers").document(normalizedPhone)
 
         docRef.get()
             .addOnSuccessListener { snapshot ->
-
                 if (!snapshot.exists()) {
-                    // Mobile number not recognized by admin → prevent signup
+                    // Mobile number not recognized by admin → show error
                     _mobileNumberError.value = "Mobile number not recognized"
+                    _alreadyRegisteredError.value = null
                     return@addOnSuccessListener
                 }
 
-                val existingName = snapshot.getString("name")
-                if (!existingName.isNullOrBlank()) {
-                    // Already signed up → reject
+                val hasSignedUp = snapshot.getBoolean("hasSignedUp") ?: false
+
+// Only show "already registered" if hasSignedUp is true
+                if (hasSignedUp) {
+                    _mobileNumberError.value = null
                     _driverFirstName.value = ""
+                    _alreadyRegisteredError.value = "You’re registered, please Sign-in"
                     onAlreadyRegistered()
-                    _mobileNumberError.value = "Already registered, go to signin instead"
                     return@addOnSuccessListener
                 }
 
-                // Prepare timestamps
+                // First-time signup → proceed
+                _alreadyRegisteredError.value = null
+
                 val createdAt = System.currentTimeMillis()
                 val createdAtDateTime = java.text.SimpleDateFormat(
                     "hh:mm a, dd MMM yyyy",
                     java.util.Locale.getDefault()
                 ).format(java.util.Date(createdAt))
 
-                // Write fields for first-time signup
                 val updates = mapOf(
                     "name" to fullName,
                     "nationalId" to nationalId,
                     "schoolName" to schoolName,
                     "createdAt" to createdAt,
-                    "createdAtDateTime" to createdAtDateTime
+                    "createdAtDateTime" to createdAtDateTime,
+                    "hasSignedUp" to true
                 )
 
                 docRef.update(updates)

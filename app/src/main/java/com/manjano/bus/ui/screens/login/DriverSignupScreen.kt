@@ -52,7 +52,7 @@ import kotlin.ranges.coerceIn
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.ui.platform.LocalFocusManager
-
+import android.util.Log
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -108,7 +108,15 @@ fun DriverSignupScreen(
     val idFocusRequester = remember { FocusRequester() }
     val schoolFocusRequester = remember { FocusRequester() }
 
-    val phoneAllowed = signupViewModel.isPhoneAllowed.collectAsState().value
+// Already-registered error – provide initial = null to avoid type inference errors
+    // Already-registered error – collect from ViewModel
+    val alreadyRegistered by signupViewModel.alreadyRegisteredError.collectAsState(initial = null)
+
+// Block actions if driver is already registered
+    val isBlocked = !alreadyRegistered.isNullOrBlank()
+
+// Phone allowed state – provide initial value if needed (Boolean? in your ViewModel)
+    val phoneAllowed by signupViewModel.isPhoneAllowed.collectAsState(initial = null)
 
     LaunchedEffect(phoneAllowed) {
         if (phoneAllowed == null) return@LaunchedEffect
@@ -322,45 +330,69 @@ fun DriverSignupScreen(
 
 // Only show error texts after Send Code was tapped
         if (phoneTouched) {
-            if (phoneErrorInvalid) {
-                Text(
-                    text = "Invalid phone number",
-                    color = Color.Red,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
-            } else if (phoneErrorNotRegistered) {
-                Text(
-                    text = "Can't proceed, contact the school",
-                    color = Color.Red,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(top = 2.dp)
-                )
+            when {
+                phoneErrorInvalid -> {
+                    Text(
+                        text = "Invalid phone number",
+                        color = Color.Red,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+
+                phoneErrorNotRegistered -> {
+                    Text(
+                        text = "Can't proceed, contact the school",
+                        color = Color.Red,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+
+                phoneAllowed == true && !alreadyRegistered.isNullOrBlank() -> {
+                    Text(
+                        text = alreadyRegistered!!,
+                        color = Color.Red,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
             }
         }
-
 // LaunchedEffect to check Firestore when user types
         LaunchedEffect(phoneNumber) {
             if (phoneNumber.isNotBlank()) {
-                signupViewModel.checkDriverPhoneNumberInFirestore(
-                    phone = phoneNumber,
-                    countryIso = selectedCountry.isoCode
-                )
+                val isValidPhone = try {
+                    PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                } catch (e: Exception) {
+                    false
+                }
+
+                if (isValidPhone) {
+                    signupViewModel.checkDriverPhoneNumberInFirestore(
+                        phone = phoneNumber,
+                        countryIso = selectedCountry.isoCode
+                    )
+                } else {
+                    // Reset previously stored Firestore state if phone is invalid
+                    signupViewModel.resetPhoneAllowed()
+                }
             } else {
                 signupViewModel.resetPhoneAllowed()
             }
         }
 
-// ---------------------------- SEND CODE VALIDATION ----------------------------
+
         // ---------------------------- SEND CODE VALIDATION ----------------------------
         ActionRow(
             rememberMe = uiState.rememberMe,
             isSendingOtp = uiState.isSendingOtp,
             onRememberMeChange = signupViewModel::onRememberMeChange,
             onGetCodeClick = {
+                // Hide keyboard
                 keyboardController?.hide()
 
-                // Mark fields as touched to show errors
+                // Mark fields as touched
                 phoneTouched = true
                 driverTouched = true
                 idTouched = true
@@ -371,33 +403,39 @@ fun DriverSignupScreen(
                 idError = idNumber.text.isBlank()
                 schoolError = schoolName.text.isBlank()
 
-                // Phone validation
+                // Validate phone
                 val isValidPhone = try {
                     PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
                 } catch (e: Exception) {
                     false
                 }
                 phoneErrorInvalid = !isValidPhone
-                if (isValidPhone) {
+
+                // If driver is already registered, skip OTP check
+                if (alreadyRegistered.isNullOrBlank() && isValidPhone) {
                     signupViewModel.checkDriverPhoneNumberInFirestore(
                         phoneNumber,
                         selectedCountry.isoCode
                     )
                 }
 
-                // --- UA FIX: reset previous OTP error ---
-                showOtpErrorMessage = false
+                // Only show OTP message if driver not already registered
+                showOtpMessage =
+                    isValidPhone && phoneAllowed == true && alreadyRegistered.isNullOrBlank()
 
-                // Show "Check SMS" message only if phone is valid & allowed
-                showOtpMessage = isValidPhone && phoneAllowed == true
-
-                // Focus the first invalid field or OTP field if all valid
+                // Focus handling
+                // Focus handling
                 when {
                     driverError -> driverFocusRequester.requestFocus()
                     idError -> idFocusRequester.requestFocus()
                     schoolError -> schoolFocusRequester.requestFocus()
-                    phoneErrorInvalid || phoneErrorNotRegistered -> phoneFocusRequester.requestFocus()
-                    else -> otpFocusRequester.requestFocus()
+                    phoneErrorInvalid || phoneErrorNotRegistered || !alreadyRegistered.isNullOrBlank() -> phoneFocusRequester.requestFocus()
+                    alreadyRegistered.isNullOrBlank() -> otpFocusRequester.requestFocus()
+                }
+
+// Disable sending OTP if driver is already registered
+                if (!alreadyRegistered.isNullOrBlank()) {
+                    showOtpMessage = false
                 }
             }
         )
@@ -416,7 +454,7 @@ fun DriverSignupScreen(
             canResend = uiState.canResendOtp,
             onResendClick = { signupViewModel.resendOtp() }
         )
-        if (showOtpMessage) { // → New: Show message only after Send Code
+        if (showOtpMessage && !isBlocked) {
             Text(
                 text = "Check SMS for 4-digit code.",
                 color = Color.Red,
@@ -508,29 +546,52 @@ fun DriverSignupScreen(
                 phoneError = phoneNumber.isEmpty() || !isValidPhone
 
                 // Only allow navigation if phone is allowed
-                if (!driverError && !idError && !schoolError && !phoneError &&
-                    uiState.otpDigits.joinToString("") == Constants.TEST_OTP &&
-                    isPhoneAllowed == true
-                ) {
+                val isPhoneValid = try {
+                    PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                } catch (e: Exception) {
+                    false
+                }
 
-                    signupViewModel.saveDriverProfileIfNeeded(
-                        phoneNumber = phoneNumber,
-                        fullName = driverName.text,
-                        nationalId = idNumber.text,
-                        schoolName = schoolName.text,
-                        countryIso = selectedCountry.isoCode
-                    )
+// Block sign-up if number already registered
+                if (!driverError && !idError && !schoolError && !phoneError && isPhoneValid) {
 
-                    // Before navigating, set the logged-in driver's phone number in the ViewModel
-                    // Pass the phone number as a navigation argument instead of calling setLoggedInDriverPhoneNumber here
-                    // Encode driverName to safely pass via URL
-                    val encodedDriverName = java.net.URLEncoder.encode(driverName.text, "UTF-8")
+                    when {
+                        alreadyRegistered.isNullOrBlank() && isPhoneAllowed == true -> {
+                            signupViewModel.saveDriverProfileIfNeeded(
+                                phoneNumber = phoneNumber,
+                                fullName = driverName.text,
+                                nationalId = idNumber.text,
+                                schoolName = schoolName.text,
+                                countryIso = selectedCountry.isoCode
+                            )
 
-                    navController.navigate("driver_dashboard/$phoneNumber/$encodedDriverName") {
-                        popUpTo("driver_signup") { inclusive = true }
+                            val encodedDriverName =
+                                java.net.URLEncoder.encode(driverName.text, "UTF-8")
+
+                            val safeDriverName =
+                                java.net.URLEncoder.encode(driverName.text, "UTF-8")
+                            runCatching {
+                                navController.navigate("driver_dashboard/$phoneNumber/$safeDriverName") {
+                                    popUpTo("driver_signup") { inclusive = true }
+                                }
+                            }.onFailure {
+                                Log.e(
+                                    "NavError",
+                                    "Cannot navigate to driver_dashboard: ${it.message}"
+                                )
+                            }
+                        }
+
+                        !alreadyRegistered.isNullOrBlank() -> {
+                            // Show already-registered error under phone input
+                            signupViewModel.setAlreadyRegisteredError("You’re registered, please Sign-in")
+                        }
+
+                        else -> {
+                            // Phone not registered or other issues
+                            phoneErrorNotRegistered = true
+                        }
                     }
-                } else if (isPhoneAllowed == false) {
-                    phoneErrorNotRegistered = true
                 }
             },
             enabled = driverName.text.isNotEmpty() &&
@@ -538,7 +599,9 @@ fun DriverSignupScreen(
                     schoolName.text.isNotEmpty() &&
                     phoneNumber.isNotEmpty() &&
                     uiState.otpDigits.joinToString("") == Constants.TEST_OTP &&
-                    isPhoneAllowed == true, // <-- NEW: button disabled until Firestore confirms
+                    isPhoneAllowed == true &&
+                    alreadyRegistered.isNullOrBlank(),  // block continue if driver already exists
+
             modifier = Modifier
                 .fillMaxWidth()
                 .offset(x = continueShakeOffset.floatValue.dp),
