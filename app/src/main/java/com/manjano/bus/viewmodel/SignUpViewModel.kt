@@ -350,21 +350,32 @@ class SignUpViewModel : ViewModel() {
                     // Only write if the profile was not filled before
                     if (existingName.isNullOrBlank()) {
 
+                        val now = java.util.Calendar.getInstance().time
+                        val dateFormatter = java.text.SimpleDateFormat(
+                            "dd MMMM yyyy",
+                            java.util.Locale.getDefault()
+                        )
+                        val timeFormatter =
+                            java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
+                        val createdAtDate = dateFormatter.format(now)
+                        val createdAtTime = timeFormatter.format(now)
+
                         firestore.collection("drivers")
                             .document(matchingDoc.id)
                             .update(
                                 mapOf(
                                     "name" to fullName,
-                                    "nationalId" to nationalId,
+                                    "idNumber" to nationalId,
                                     "schoolName" to schoolName,
-                                    "createdAt" to System.currentTimeMillis()
+                                    "createdOn" to createdAtDate,
+                                    "createdTime" to createdAtTime
                                 )
                             )
                             .addOnSuccessListener {
                                 Log.d("🔥", "Driver profile saved successfully")
                             }
-                            .addOnFailureListener {
-                                Log.e("🔥", "Failed to save driver profile", it)
+                            .addOnFailureListener { e ->
+                                Log.e("🔥", "Failed to save driver profile", e)
                             }
 
                     } else {
@@ -376,24 +387,90 @@ class SignUpViewModel : ViewModel() {
                 }
 
             }
-            .addOnFailureListener {
-                Log.e("🔥", "Firestore query failed", it)
+            .addOnFailureListener { e ->
+                Log.e("🔥", "Firestore query failed", e)
             }
     }
     fun saveParentAndChildren(
         parentName: String,
-        childrenNames: List<String>,
-        context: Context
+        childrenNamesCsv: String, // Comma-separated from UI
+        context: Context,
+        phoneNumber: String
     ) {
-        // Example: Save parent node
-        val parentRef = FirebaseFirestore.getInstance().collection("parents").document(parentName)
-        val data = hashMapOf(
-            "parentName" to parentName,
-            "children" to childrenNames
-        )
-        parentRef.set(data)
-            .addOnSuccessListener { Log.d("🔥", "Parent saved") }
-            .addOnFailureListener { e -> Log.e("🔥", "Failed to save parent", e) }
+        val firestore = FirebaseFirestore.getInstance()
+
+        // Split CSV into list
+        val childrenList = childrenNamesCsv.split(",")
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+
+        if (childrenList.isEmpty()) {
+            Log.e("🔥", "No child names provided")
+            return
+        }
+
+        val normalizedPhone = phoneNumber.filter { it.isDigit() }
+
+        firestore.collection("parents")
+            .whereEqualTo("mobileNumber", normalizedPhone)
+            .get()
+            .addOnSuccessListener { docs ->
+                if (docs.isEmpty) {
+                    Log.e("🔥", "Parent phone not found in Firestore. Cannot fetch schoolName.")
+                    return@addOnSuccessListener
+                }
+
+                val parentDoc = docs.documents.first()
+                val schoolName = parentDoc.getString("school") ?: "Unknown School"
+
+                // Prepare child fields dynamically
+                val childFields = mutableMapOf<String, Any>(
+                    "parentName" to parentName,
+                    "schoolName" to schoolName
+                )
+
+                if (childrenList.size == 1) {
+                    childFields["childName"] = childrenList.first()
+                } else {
+                    childrenList.forEachIndexed { index, child ->
+                        childFields["childName${index + 1}"] = child
+                    }
+                }
+
+                // Save to children collection
+                firestore.collection("children")
+                    .document(normalizedPhone)
+                    .set(childFields)
+                    .addOnSuccessListener {
+                        Log.d("🔥", "Children collection updated successfully for $parentName")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("🔥", "Failed to save children collection", e)
+                    }
+
+                // Update parent document
+                val parentUpdate = mutableMapOf<String, Any>(
+                    "parentName" to parentName
+                )
+                if (childrenList.size == 1) parentUpdate["childName"] = childrenList.first()
+                else childrenList.forEachIndexed { index, child ->
+                    parentUpdate["childName${index + 1}"] = child
+                }
+
+                firestore.collection("parents")
+                    .document(parentDoc.id)
+                    .update(parentUpdate)
+                    .addOnSuccessListener {
+                        Log.d("🔥", "Parent document updated with child names")
+                    }
+                    .addOnFailureListener { e ->
+                        Log.e("🔥", "Failed to update parent document", e)
+                    }
+
+            }
+            .addOnFailureListener { e ->
+                Log.e("🔥", "Failed to fetch parent document", e)
+            }
     }
     fun onRememberMeChange(checked: Boolean) {
         _uiState.value = _uiState.value.copy(rememberMe = checked)

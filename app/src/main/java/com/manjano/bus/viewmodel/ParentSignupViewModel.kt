@@ -9,13 +9,15 @@ import androidx.lifecycle.ViewModel
 import com.google.firebase.FirebaseApp
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.storage.FirebaseStorage
-
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 private fun sanitizeKey(name: String): String =
     name.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
 
 class ParentSignupViewModel : ViewModel() {
 
     private val rootRef = FirebaseDatabase.getInstance().reference
+    private val firestore = FirebaseFirestore.getInstance()
 
     init {
         try {
@@ -45,10 +47,51 @@ class ParentSignupViewModel : ViewModel() {
     fun saveParentAndChildren(
         parentName: String,
         childrenNames: String,
+        parentPhone: String,
         context: Context
     ) {
 
         Log.d("🔥", "ParentSignupViewModel save called")
+
+        // --- Firestore Children Collection ---
+        val childrenList =
+            childrenNames.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+
+        val parentDocRef = firestore.collection("parents").document(parentPhone)
+
+        parentDocRef.get().addOnSuccessListener { parentDoc ->
+
+            if (!parentDoc.exists()) {
+                Log.e("🔥", "Parent document not found in Firestore: $parentPhone")
+                return@addOnSuccessListener
+            }
+
+            val schoolName = parentDoc.getString("school")
+                ?: ""  // <-- important: use the exact field name "school"
+
+            val childrenData = mutableMapOf<String, Any>(
+                "parentName" to parentName,
+                "schoolName" to schoolName
+            )
+
+            if (childrenList.size == 1) {
+                childrenData["childName"] = childrenList.first()
+            } else {
+                childrenList.forEachIndexed { index, name ->
+                    childrenData["childName${index + 1}"] = name
+                }
+            }
+
+            firestore.collection("children")
+                .document(parentPhone)
+                .set(childrenData, SetOptions.merge())
+                .addOnSuccessListener {
+                    Log.d("🔥", "Children collection updated in Firestore")
+                }
+                .addOnFailureListener {
+                    Log.e("🔥", "Failed writing children collection", it)
+                }
+        }
 
         if (!isNetworkAvailable(context)) {
             Log.e("🔥", "No network connection")
