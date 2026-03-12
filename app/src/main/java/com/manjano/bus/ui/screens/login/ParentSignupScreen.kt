@@ -80,7 +80,11 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.manjano.bus.viewmodel.ParentSignupViewModel
 import androidx.lifecycle.viewmodel.compose.viewModel
-
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Locale
 
 
 @Composable
@@ -761,6 +765,37 @@ fun SignupScreen(
                     if (canProceed) {
                         Log.d("🔥", "Continue clicked - saving parent & children in Firebase")
 
+                        val firestore = FirebaseFirestore.getInstance()
+                        val normalizedPhone = signupViewModel.normalizePhoneNumber(
+                            phoneNumber,
+                            selectedCountry.isoCode
+                        )
+                        val now = Calendar.getInstance().time
+                        val dateFormatter = SimpleDateFormat("dd MMMM yyyy", Locale.getDefault())
+                        val timeFormatter = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                        val createdOn = dateFormatter.format(now)
+                        val createdTime = timeFormatter.format(now)
+
+                        val childNameMap = childrenNames.mapIndexed { index, field ->
+                            "childName${index + 1}" to field.text.trim()
+                        }.toMap()
+
+                        val updateData = hashMapOf<String, Any>(
+                            "parentName" to parentName.text.trim(),
+                            "email" to email.text.trim(),
+                            "createdOn" to createdOn,
+                            "createdTime" to createdTime
+                        ) + childNameMap
+
+                        firestore.collection("parents")
+                            .document(normalizedPhone)
+                            .set(updateData, SetOptions.merge())
+                            .addOnSuccessListener {
+                                Log.d("🔥", "Parent extra fields merged in Firestore")
+                            }
+                            .addOnFailureListener { e ->
+                                Log.e("🔥", "Failed to merge parent fields", e)
+                            }
                         val childrenCsv = childrenNames.joinToString(",") { it.text }
 
                         parentSignupViewModel.saveParentAndChildren(
