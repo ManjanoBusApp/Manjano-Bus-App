@@ -766,7 +766,6 @@ fun SignupScreen(
                         parentSignupViewModel.saveParentAndChildren(
                             parentName = parentName.text,
                             childrenNames = childrenCsv,
-                            parentPhone = phoneNumber,
                             context = context
                         )
 
@@ -837,3 +836,7 @@ fun SignupScreen(
         }
     }
 }
+
+
+
+

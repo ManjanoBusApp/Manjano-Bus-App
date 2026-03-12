@@ -10,7 +10,6 @@ import com.google.firebase.database.DatabaseError
 import com.google.firebase.database.DatabaseReference
 import com.google.firebase.database.FirebaseDatabase
 import com.google.firebase.database.ValueEventListener
-import com.google.firebase.firestore.FieldValue
 import com.google.firebase.storage.FirebaseStorage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,9 +21,6 @@ import kotlinx.coroutines.tasks.await
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import com.google.firebase.storage.StorageException
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.isActive
-
 
 /** Sanitizes a string to be used as a Firebase Realtime Database key.
  * Converts to lowercase and replaces non-alphanumeric characters with underscores.
@@ -50,7 +46,6 @@ class ParentDashboardViewModel(
         }
     }
 
-    private val firestore = FirebaseFirestore.getInstance()
     private val database =
         FirebaseDatabase.getInstance("https://manjano-bus-default-rtdb.firebaseio.com/").reference
 
@@ -97,152 +92,6 @@ class ParentDashboardViewModel(
         }
     }
 
-    fun syncFirestoreAndRealtime(parentPhone: String, parentName: String) {
-        val parentKey = sanitizeKey(parentName)
-        val firestoreChildrenDoc = firestore.collection("children").document(parentPhone)
-        val rtdbChildrenRef = database.child("parents").child(parentKey).child("children")
-
-        // ────────────────────────────────────────────────
-        // 1. Firestore → Realtime DB (snapshot listener)
-        // ────────────────────────────────────────────────
-        firestoreChildrenDoc.addSnapshotListener { snapshot, error ->
-            if (error != null) {
-                Log.e("🔥", "Firestore children listener error", error)
-                return@addSnapshotListener
-            }
-
-            if (snapshot == null || !snapshot.exists()) {
-                // Document deleted or doesn't exist → clear children in RTDB
-                rtdbChildrenRef.removeValue()
-                    .addOnSuccessListener {
-                        Log.d(
-                            "🔥",
-                            "Cleared RTDB children after Firestore doc delete"
-                        )
-                    }
-                _childrenKeys.value = emptyList()
-                return@addSnapshotListener
-            }
-
-            val firestoreData = snapshot.data ?: emptyMap<String, Any>()
-
-            // We only care about child entries (keys like childName, childName1, childName2, ... or direct child objects)
-            val updatesToRTDB = mutableMapOf<String, Any?>()
-
-            firestoreData.forEach { (key, value) ->
-                // Skip parent-level fields if any (e.g. parentName, schoolName)
-                if (key == "parentName" || key == "schoolName") return@forEach
-
-                // Handle both flat structure (childName1 = "John") and map structure
-                if (value is String && key.startsWith("childName")) {
-                    val childIndex = key.removePrefix("childName").toIntOrNull() ?: 0
-                    val childKey = sanitizeKey(value)
-                    updatesToRTDB[childKey] = mapOf(
-                        "displayName" to value,
-                        // minimal defaults — do NOT copy photoUrl/eta/status here
-                        "active" to true
-                    )
-                } else if (value is Map<*, *>) {
-                    // If you ever migrate to real child objects in Firestore
-                    val childKey = sanitizeKey(key)
-                    updatesToRTDB[childKey] = value
-                }
-            }
-
-            if (updatesToRTDB.isNotEmpty()) {
-                rtdbChildrenRef.updateChildren(updatesToRTDB)
-                    .addOnSuccessListener {
-                        Log.d(
-                            "🔥",
-                            "Firestore → RTDB children sync complete (${updatesToRTDB.size} children)"
-                        )
-                    }
-                    .addOnFailureListener { e ->
-                        Log.e("🔥", "Firestore → RTDB sync failed", e)
-                    }
-            }
-
-            // Update local UI list (only sanitized keys)
-            _childrenKeys.value = updatesToRTDB.keys.toList()
-        }
-
-        // ────────────────────────────────────────────────
-        // 2. Realtime DB → Firestore (child-level listeners)
-        // ────────────────────────────────────────────────
-        rtdbChildrenRef.addChildEventListener(object : ChildEventListener {
-            override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
-                val childKey = snapshot.key ?: return
-                val childData = snapshot.value as? Map<*, *> ?: return
-
-                // Only sync minimal relevant fields — avoid photoUrl, eta, status if they are managed elsewhere
-                val syncData = mutableMapOf<String, Any>()
-                childData.forEach { (k, v) ->
-                    if (k != "photoUrl" && k != "eta" && k != "status") {  // exclude fields you don't want to mirror
-                        syncData[k.toString()] = v!!
-                    }
-                }
-                if (syncData.isNotEmpty()) {
-                    // Option A: flat structure (childName1, childName2, ...)
-                    // syncData["displayName"]?.let { name ->
-                    //     val index = _childrenKeys.value.indexOf(childKey) + 1
-                    //     firestoreChildrenDoc.update("childName$index", name)
-                    // }
-
-                    // Option B: child objects (recommended for future)
-                    firestoreChildrenDoc.update(mapOf(childKey to syncData))
-                        .addOnSuccessListener {
-                            Log.d(
-                                "🔥",
-                                "RTDB → Firestore added/updated child: $childKey"
-                            )
-                        }
-                        .addOnFailureListener {
-                            Log.e(
-                                "🔥",
-                                "RTDB → Firestore add failed: $childKey",
-                                it
-                            )
-                        }
-                }
-            }
-
-            override fun onChildChanged(snapshot: DataSnapshot, previousChildName: String?) {
-                onChildAdded(snapshot, previousChildName)  // same logic for updates
-            }
-
-            override fun onChildRemoved(snapshot: DataSnapshot) {
-                val childKey = snapshot.key ?: return
-
-                // Option A: flat — you'd need to know index → difficult → better to use child objects
-                // Option B: child objects
-                firestoreChildrenDoc.update(mapOf(childKey to FieldValue.delete()))
-                    .addOnSuccessListener {
-                        Log.d(
-                            "🔥",
-                            "RTDB → Firestore removed child: $childKey"
-                        )
-                    }
-                    .addOnFailureListener {
-                        Log.e(
-                            "🔥",
-                            "RTDB → Firestore remove failed: $childKey",
-                            it
-                        )
-                    }
-
-                // Also update local list
-                _childrenKeys.value = _childrenKeys.value.filter { it != childKey }
-            }
-
-            override fun onChildMoved(snapshot: DataSnapshot, previousChildName: String?) {
-                // Usually ignore unless you care about order
-            }
-
-            override fun onCancelled(error: DatabaseError) {
-                Log.e("🔥", "RTDB children listener cancelled: ${error.message}")
-            }
-        })
-    }
     fun initializeParent(rawParentName: String) {
         val initialKey = sanitizeKey(rawParentName)
         if (_parentKey.value.isEmpty()) {
@@ -257,10 +106,7 @@ class ParentDashboardViewModel(
 
     private val _parentDisplayName = MutableStateFlow("")
     val parentDisplayName: StateFlow<String> get() = _parentDisplayName
-    private var parentPhone: String = ""
 
-    // Keep track of active image update jobs to prevent duplicates
-    private val activeImageJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
     private val childrenEventListener = object : ChildEventListener {
         override fun onChildAdded(snapshot: DataSnapshot, previousChildName: String?) {
             val key = snapshot.key ?: return
@@ -445,25 +291,6 @@ class ParentDashboardViewModel(
         // This runs only when _parentKey is first set to a non-empty value.
         viewModelScope.launch {
             liveParentKey.collectLatest { key ->
-                if (_parentKey.value.isNotBlank()) {
-
-
-                    // Use this function to set the parent phone after login/signup
-                    fun setParentPhone(phone: String) {
-                        parentPhone = phone
-                        syncFirestoreAndRealtime(
-                            parentPhone,
-                            _parentDisplayName.value.ifBlank { "Unknown Parent" })
-                    }
-
-// Then replace the placeholder in init { ... } with:
-                    if (_parentKey.value.isNotBlank() && parentPhone.isNotBlank()) {
-                        syncFirestoreAndRealtime(
-                            parentPhone,
-                            _parentDisplayName.value.ifBlank { "Unknown Parent" })
-                    }
-                }
-
                 if (key.isNotBlank()) {
                     val currentParentRef = database.child("parents").child(key)
 
@@ -559,37 +386,41 @@ class ParentDashboardViewModel(
     }
 
     fun monitorStorageForChildImage(childKey: String) {
-        val normalizedKey = sanitizeKey(childKey)
-        if (activeImageJobs.containsKey(normalizedKey)) return
+        if (activeStorageMonitors.contains(childKey)) return
+        activeStorageMonitors.add(childKey)
 
-        val job = viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
-            val storageRef = FirebaseStorage.getInstance()
-                .reference.child("Children Images/$normalizedKey.png")
+        viewModelScope.launch(kotlinx.coroutines.Dispatchers.IO) {
+            val storageRef =
+                com.google.firebase.storage.FirebaseStorage.getInstance().reference.child("Children Images/$childKey.png")
 
-            var attempt = 0
-            var backoffDelay = 5000L
+            liveParentKey.collectLatest { pKey ->
+                if (pKey.isBlank()) return@collectLatest
 
-            while (isActive) {
-                try {
-                    val url = storageRef.downloadUrl.await().toString()
+                var imageFound = false
+                while (!imageFound) {
+                    try {
+                        val url = storageRef.downloadUrl.await().toString()
 
-                    childrenRef.child(normalizedKey).child("photoUrl")
-                        .setValue(url).await()
+                        database.child("parents")
+                            .child(pKey)
+                            .child("children")
+                            .child(childKey)
+                            .child("photoUrl")
+                            .setValue(url)
+                            .await()
 
-                    Log.d("🔥", "Child image updated: $normalizedKey")
-                    break
-                } catch (e: Exception) {
-                    attempt++
-                    Log.w("🔥", "Image not found yet for $normalizedKey, retry #$attempt")
-                    delay(backoffDelay)
-                    backoffDelay = (backoffDelay * 1.5).toLong().coerceAtMost(60000L)
+                        imageFound = true
+                        activeStorageMonitors.remove(childKey)
+                    } catch (e: Exception) {
+                        kotlinx.coroutines.delay(5000L)
+                    }
                 }
             }
         }
-
-        activeImageJobs[normalizedKey] = job
-        job.invokeOnCompletion { activeImageJobs.remove(normalizedKey) }
     }
+
+    // Inside your ViewModel:
+    private val activeStorageMonitors = mutableSetOf<String>()
 
     fun getValidChildNames(): StateFlow<List<String>> {
         val result = MutableStateFlow<List<String>>(emptyList())
@@ -904,19 +735,29 @@ class ParentDashboardViewModel(
             snapshot.children.forEach { childSnap ->
                 val key = childSnap.key ?: return@forEach
                 val currentUrl = childSnap.child("photoUrl").getValue(String::class.java).orEmpty()
-
                 val matchedFileName = findBestImageMatch(key, normalizedFiles)
 
-                val newUrl = if (matchedFileName != null) {
-                    val encoded = android.net.Uri.encode(matchedFileName)
-                    "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$encoded?alt=media"
-                } else DEFAULT_CHILD_PHOTO_URL
+                if (matchedFileName != null) {
+                    val encodedName = android.net.Uri.encode(matchedFileName)
+                    val newUrl =
+                        "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F$encodedName?alt=media"
 
-                if (currentUrl != newUrl) {
-                    childrenRef.child(key).child("photoUrl").setValue(newUrl)
-                        .addOnSuccessListener {
-                            Log.d("🔥", "Repaired image for child: $key")
-                        }
+                    if (currentUrl != newUrl) {
+                        childrenRef.child(key).child("photoUrl").setValue(newUrl)
+                            .addOnSuccessListener {
+                                Log.d("🔥", "AUTO-DETECT: Image updated for $key")
+                            }
+                    }
+                } else {
+                    if (!currentUrl.contains("defaultchild.png") && currentUrl.isNotBlank() && currentUrl != "null") {
+                        childrenRef.child(key).child("photoUrl").setValue(DEFAULT_CHILD_PHOTO_URL)
+                            .addOnSuccessListener {
+                                Log.d(
+                                    "🔥",
+                                    "AUTO-CLEAN: Image missing from storage for $key. Reverted to default."
+                                )
+                            }
+                    }
                 }
             }
         }
