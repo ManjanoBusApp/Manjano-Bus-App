@@ -412,7 +412,7 @@ fun AdminSignInScreen(
                     showValidationError = false
 
                     val enteredOtp = uiState.otpDigits.joinToString("")
-                    viewModel.updateOtpDigits(enteredOtp)
+                    viewModel.onOtpPaste(enteredOtp)
                     viewModel.verifyOtp()
 
                     scope.launch {

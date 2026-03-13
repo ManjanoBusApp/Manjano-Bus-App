@@ -122,6 +122,9 @@ fun SignInScreen(
     val isPhoneAllowed by viewModel.isPhoneAllowed.collectAsStateWithLifecycle()
     var phoneErrorText by remember { mutableStateOf("") }
 
+    val isPreRegistered by viewModel.isPreRegistered.collectAsStateWithLifecycle()
+    val isSignedUp by viewModel.isSignedUp.collectAsStateWithLifecycle()
+
     LaunchedEffect(uiState.navigateToDashboard) {
         if (uiState.navigateToDashboard) {
 
@@ -202,9 +205,15 @@ fun SignInScreen(
                     .fillMaxWidth()
                     .onFocusChanged { focusState ->
                         if (focusState.isFocused) {
+                            // Clear everything when user starts editing
                             phoneErrorText = ""
-                            // Optional: reset allowed state if you want fresh check on re-focus
-                            // viewModel.resetPhoneAllowed()
+                            viewModel.resetPhoneAllowed()
+                            viewModel.resetPreRegistered()
+                            viewModel.resetSignedUp()
+                            // If you added these reset functions in ViewModel:
+                            // viewModel.resetPreRegistered()
+                            // viewModel.resetSignedUp()
+                            // (add them if missing – see step 3)
                         }
                     }
             ) {
@@ -214,7 +223,7 @@ fun SignInScreen(
                     onCountrySelected = viewModel::onCountrySelected,
                     onPhoneNumberChange = {
                         viewModel.onPhoneNumberChange(it)
-                        phoneErrorText = ""  // Clear error on typing
+                        phoneErrorText = ""  // still clear local error on typing
                     },
                     showError = false,
                     onShowErrorChange = { /* ignore */ },
@@ -223,29 +232,33 @@ fun SignInScreen(
                     focusManager = focusManager
                 )
             }
+            // Priority-based error display under phone field
+            val displayedError = when {
+                isPhoneAllowed == false &&
+                        isPreRegistered == true &&
+                        isSignedUp == false -> {
+                    "You have no account, please sign-up first"
+                }
 
-            // Show Firestore-based error (identical to signup style)
-            if (phoneErrorText.isNotEmpty()) {
+                isPhoneAllowed == false &&
+                        isPreRegistered == false -> {
+                    "Can't proceed, contact the school"
+                }
+
+                phoneErrorText.isNotEmpty() -> phoneErrorText  // keeps existing format/invalid errors
+                else -> null
+            }
+
+            if (displayedError != null) {
                 Text(
-                    text = phoneErrorText,
+                    text = displayedError,
                     color = Color.Red,
                     fontSize = 12.sp,
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
 
-            // NEW: Trigger Firestore check when phone number or country changes
-            LaunchedEffect(uiState.rawPhoneInput, uiState.selectedCountry) {
-                if (uiState.rawPhoneInput.isNotBlank()) {
-                    viewModel.checkPhoneNumberInFirestore(
-                        phone = uiState.rawPhoneInput,
-                        countryIso = uiState.selectedCountry.isoCode
-                    )
-                } else {
-                    viewModel.resetPhoneAllowed()
-                    phoneErrorText = ""
-                }
-            }
+
 
             val snackbarHostState = remember { SnackbarHostState() }
 
@@ -265,10 +278,52 @@ fun SignInScreen(
                             uiState.rawPhoneInput.length >= 8  // basic length check to avoid false "incomplete"
 
                     scope.launch {
-                        // Wait briefly if Firestore check is still pending
-                        if (isPhoneAllowed == null && uiState.rawPhoneInput.isNotBlank()) {
-                            delay(800)  // Allow time for async Firestore response
+                        // Force fresh Firestore check on button press
+                        viewModel.checkPhoneNumberInFirestore(
+                            phone = uiState.rawPhoneInput,
+                            countryIso = uiState.selectedCountry.isoCode
+                        )
+
+                        // Wait up to ~1.5s for Firestore result
+                        for (i in 1..15) {
+                            delay(100)
+                            if (isPhoneAllowed != null) {
+                                break  // compiler is happy with 'break' here
+                            }
                         }
+
+                        // Now evaluate based on final states
+                        phoneErrorText = ""
+
+                        if (!isFormatValid || !isCompleteEnough) {
+                            phoneErrorText = "Invalid phone number"
+                            phoneFocusRequester.requestFocus()
+                            return@launch
+                        }
+
+                        // ── NEW priority check using the three states ──
+                        when {
+                            isPhoneAllowed != true -> {
+                                when {
+                                    isPreRegistered == true && isSignedUp == false -> {
+                                        phoneErrorText = "You have no account, please sign-up first"
+                                    }
+
+                                    isPreRegistered == false -> {
+                                        phoneErrorText = "Can't proceed, contact the school"
+                                    }
+                                }
+                                phoneFocusRequester.requestFocus()
+                                return@launch
+                            }
+                        }
+
+                        // All good → proceed to OTP
+                        phoneErrorText = ""
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        viewModel.requestOtp()
+
 
                         // Clear previous errors first
                         phoneErrorText = ""
@@ -452,7 +507,7 @@ fun SignInScreen(
                     focusManager.clearFocus()
                     showValidationError = false
                     val enteredOtp = uiState.otpDigits.joinToString("")
-                    viewModel.updateOtpDigits(enteredOtp)
+                    viewModel.onOtpPaste(enteredOtp)  // replaces updateOtpDigits
                     viewModel.verifyOtp()
 
                     scope.launch {

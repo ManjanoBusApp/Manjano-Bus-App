@@ -72,62 +72,77 @@ class SignInViewModel : ViewModel() {
     private val _isPhoneAllowed = MutableStateFlow<Boolean?>(null) // null = not checked yet
     val isPhoneAllowed: StateFlow<Boolean?> = _isPhoneAllowed
 
+    // NEW: Distinguish "saved by admin" vs "actually signed up"
+    private val _isPreRegistered = MutableStateFlow<Boolean?>(null)  // exists in collection
+    val isPreRegistered: StateFlow<Boolean?> = _isPreRegistered
+
+    private val _isSignedUp = MutableStateFlow<Boolean?>(null)       // has name / children
+    val isSignedUp: StateFlow<Boolean?> = _isSignedUp
+
     fun checkPhoneNumberInFirestore(phone: String, countryIso: String) {
         val db = FirebaseFirestore.getInstance()
 
         val normalizedInput = normalizePhoneNumber(phone, countryIso)
-        val inputDigits = normalizedInput.filter { it.isDigit() }
 
-        // Decide collection based on role
-        val collectionName = when (userRole) {
+
+        val collectionName = when (userRole?.lowercase()) {
             "driver" -> "drivers"
-            "parent", null -> "parents"  // fallback to parents if role not set
-            else -> "parents"            // safety
+            else -> "parents"  // parent or null fallback
         }
 
         db.collection(collectionName)
+            .whereEqualTo("mobileNumber", normalizedInput)
+            .limit(1)
             .get()
             .addOnSuccessListener { documents ->
-                val matched = documents.documents.any { doc ->
-                    val dbNumber = doc.getString("mobileNumber") ?: ""
+                val matchingDoc = documents.documents.firstOrNull()
+                if (matchingDoc != null) {
+                    _isPreRegistered.value = true
 
-                    if (countryIso.equals("KE", ignoreCase = true)) {
-                        dbNumber == normalizedInput
-                    } else {
-                        val dbClean = dbNumber.replace("[^+0-9]".toRegex(), "")
-                        val inputClean = phone.replace("[^+0-9]".toRegex(), "")
+                    // Check if profile is completed (signed up)
+                    val nameField = if (collectionName == "drivers") "name" else "parentName"
+                    val hasName = !matchingDoc.getString(nameField).isNullOrBlank()
 
-                        val callingCode = CountryRepository.countries
-                            .find { it.isoCode.equals(countryIso, ignoreCase = true) }
-                            ?.callingCode
-                            ?.replace("[^+0-9]".toRegex(), "") ?: ""
+                    val hasChild = if (collectionName == "parents") {
+                        matchingDoc.data?.keys?.any { it.startsWith("childName") } == true
+                    } else false
 
-                        val expectedE164 = when {
-                            inputClean.startsWith("+") -> inputClean
-                            inputClean.startsWith("00") -> "+" + inputClean.drop(2)
-                            inputClean.startsWith("0") -> "+$callingCode${inputClean.drop(1)}"
-                            else -> "+$callingCode$inputClean"
-                        }
+                    _isSignedUp.value = hasName || hasChild
 
-                        dbClean == expectedE164
-                    }
+                    Log.d(
+                        "SignInCheck",
+                        "$collectionName match found - pre-registered: true, signed-up: ${_isSignedUp.value}"
+                    )
+                } else {
+                    _isPreRegistered.value = false
+                    _isSignedUp.value = false
+                    Log.d("SignInCheck", "No match in $collectionName")
                 }
 
-                _isPhoneAllowed.value = matched
-
-                Log.d(
-                    "PhoneCheck",
-                    "Role: $userRole | Collection: $collectionName | Input: $phone | Matched: $matched"
-                )
+                _isPhoneAllowed.value = when {
+                    _isPreRegistered.value == false -> false // Can't proceed, contact admin
+                    _isSignedUp.value == false -> false       // Signed up not completed
+                    _isPreRegistered.value == true && _isSignedUp.value == true -> true
+                    else -> false
+                }
             }
             .addOnFailureListener { e ->
-                Log.e("PhoneCheck", "Firestore failed: ${e.message}", e)
+                Log.e("SignInCheck", "Firestore query failed: ${e.message}", e)
                 _isPhoneAllowed.value = false
+                _isPreRegistered.value = false
+                _isSignedUp.value = false
             }
     }
-
     fun resetPhoneAllowed() {
         _isPhoneAllowed.value = null
+    }
+
+    fun resetPreRegistered() {
+        _isPreRegistered.value = null
+    }
+
+    fun resetSignedUp() {
+        _isSignedUp.value = null
     }
 
     fun setOtpValid(isValid: Boolean) {
@@ -187,130 +202,162 @@ class SignInViewModel : ViewModel() {
     }
 
     // --- Phone number input handling ---
+    // --- Unified phone validation + Firestore check ---
     fun onPhoneNumberChange(rawInput: String) {
         _uiState.value = _uiState.value.copy(
             rawPhoneInput = rawInput,
             showError = false,
+            phoneValidationMessage = null,
             isPhoneValidationVisible = false
         )
 
+        val countryCode = _uiState.value.selectedCountry.isoCode
+        val normalized = normalizePhoneNumber(rawInput, countryCode)
 
-        // Keep formatted phone for display
-        val formatted = PhoneNumberUtils.formatPhoneNumberAsYouType(
-            rawDigits = rawInput,
-            regionCode = _uiState.value.selectedCountry.isoCode
+        // Validate length / general validity
+        val isValidNumber = PhoneNumberUtils.isPossibleNumber(normalized, countryCode)
+        _uiState.value = _uiState.value.copy(
+            formattedPhone = PhoneNumberUtils.formatForDisplay(normalized, countryCode),
+            isPhoneValid = isValidNumber,
+            phoneValidationMessage = if (isValidNumber) null else "Invalid phone number",
+            isPhoneValidationVisible = true,
+            showError = !isValidNumber
         )
-        _uiState.value = _uiState.value.copy(formattedPhone = formatted)
 
-// Normalize phone for validation & future use
-        var normalized = rawInput.filter { it.isDigit() }
-        if (normalized.startsWith("254")) {
-            normalized = "0" + normalized.substring(3)
-        }
-
-// Validate the normalized number
-        val isValid =
-            PhoneNumberUtils.isPossibleNumber(normalized, _uiState.value.selectedCountry.isoCode)
-        _uiState.value = _uiState.value.copy(isPhoneValid = isValid)
-
-        _uiState.value = _uiState.value.copy(isPhoneValid = isValid)
+        // Reset Firestore checks if number changes
+        resetPreRegistered()
+        resetSignedUp()
+        resetPhoneAllowed()
     }
 
     fun onPhoneFocusChanged(hasFocus: Boolean) {
         if (!hasFocus) {
+            // Revalidate to show/hide invalid number message
             validateAndFormatPhoneNumber(_uiState.value.rawPhoneInput)
+            // Clear Firestore-specific error messages on refocus
+            _uiState.value = _uiState.value.copy(
+                phoneValidationMessage = null,
+                showError = false
+            )
+        }
+    }
+
+    private fun validateAndFormatPhoneNumber(rawInput: String) {
+        val countryCode = _uiState.value.selectedCountry.isoCode
+        val normalized = normalizePhoneNumber(rawInput, countryCode)
+        val isValidNumber = PhoneNumberUtils.isPossibleNumber(normalized, countryCode)
+        val formatted = PhoneNumberUtils.formatForDisplay(normalized, countryCode)
+        _uiState.value = _uiState.value.copy(
+            formattedPhone = formatted,
+            isPhoneValid = isValidNumber,
+            phoneValidationMessage = if (isValidNumber) null else "Invalid phone number",
+            isPhoneValidationVisible = true,
+            showError = !isValidNumber
+        )
+    }
+
+    // --- Request OTP (updated for single tap + proper messages) ---
+    fun requestOtp() {
+        if (_uiState.value.isSendingOtp) return
+
+        _uiState.value = _uiState.value.copy(
+            showError = false,
+            phoneValidationMessage = null,
+            generalErrorMessage = null,
+            generalValidationError = false
+        )
+
+        // Validate first
+        val rawDigits = _uiState.value.rawPhoneInput.filter { it.isDigit() }
+
+        val isValidLength = when (_uiState.value.selectedCountry.isoCode.uppercase()) {
+            "KE" -> rawDigits.length == 10
+            else -> PhoneNumberUtils.isPossibleNumber(
+                _uiState.value.rawPhoneInput,
+                _uiState.value.selectedCountry.isoCode
+            )
+        }
+
+        if (!isValidLength) {
+            _uiState.value = _uiState.value.copy(
+                showError = true,
+                phoneValidationMessage = "Invalid phone number",
+                isPhoneValidationVisible = true,
+                generalValidationError = true
+            )
+
+            resetPreRegistered()
+            resetSignedUp()
+            resetPhoneAllowed()
+
+            return
+        }
+
+        viewModelScope.launch {
+            // Firestore check if not already done
+            checkPhoneNumberInFirestore(
+                phone = _uiState.value.rawPhoneInput,
+                countryIso = _uiState.value.selectedCountry.isoCode
+            )
+
+            while (_isPhoneAllowed.value == null) {
+                delay(50)
+            }
+            // Determine error or proceed
+            when {
+                _isPreRegistered.value == false -> {
+                    _uiState.value = _uiState.value.copy(
+                        showError = true,
+                        phoneValidationMessage = "Can't proceed, contact the school",
+                        isPhoneValidationVisible = true
+                    )
+                    return@launch
+                }
+
+                _isSignedUp.value == false -> {
+                    _uiState.value = _uiState.value.copy(
+                        showError = true,
+                        phoneValidationMessage = "You have no account, please sign-up first",
+                        isPhoneValidationVisible = true
+                    )
+                    return@launch
+                }
+
+                else -> {
+                    // Clear errors and send OTP
+                    _uiState.value = _uiState.value.copy(
+                        showError = false,
+                        phoneValidationMessage = null,
+                        isPhoneValidationVisible = false,
+                        isSendingOtp = true
+                    )
+                    try {
+                        delay(1500) // simulate OTP send
+
+                        _uiState.value = _uiState.value.copy(
+                            isSendingOtp = false,
+                            otpRequestSuccess = true,
+                            showSmsMessage = true,
+                            resendTimerSeconds = 30,
+                            canResendOtp = false,
+                            sentOtp = Constants.TEST_OTP // dev-only
+                        )
+
+                        startResendTimer()
+                    } catch (e: Exception) {
+                        _uiState.value = _uiState.value.copy(
+                            isSendingOtp = false,
+                            generalErrorMessage = "Failed to send OTP. Please try again."
+                        )
+                    }
+                }
+            }
         }
     }
 
     fun hideSmsMessage() {
         _uiState.value = _uiState.value.copy(showSmsMessage = false)
     }
-
-    private fun validateAndFormatPhoneNumber(rawInput: String) {
-        val countryCode = _uiState.value.selectedCountry.isoCode
-        val isValid = PhoneNumberUtils.isValidNumber(rawInput, countryCode)
-        val formatted = PhoneNumberUtils.formatForDisplay(rawInput, countryCode)
-
-        val validationMessage = if (isValid) null else "Please Enter a Valid Phone Number"
-
-        _uiState.value = _uiState.value.copy(
-            formattedPhone = formatted,
-            isPhoneValid = isValid,
-            phoneValidationMessage = validationMessage,
-            isPhoneValidationVisible = true,
-            showError = !isValid
-        )
-    }
-    private fun getTestRole(phone: String): String? {
-        // Normalize phone: remove spaces and ensure full format
-        val normalized = phone.replace(" ", "")
-        return when (normalized) {
-            "+254700123456" -> "school_admin"   // test admin
-            "+254700222222" -> "super_admin"    // test super admin
-            else -> null
-        }
-    }
-
-    // --- OTP digit updates (manual entry or paste) ---
-    fun updateOtpDigits(otp: String) {
-        val digits = otp.filter { it.isDigit() }.take(Constants.OTP_LENGTH)
-        val paddedDigits = List(Constants.OTP_LENGTH) { index ->
-            digits.getOrNull(index)?.toString() ?: ""
-        }
-
-        _uiState.value = _uiState.value.copy(
-            otpDigits = paddedDigits,
-            isOtpComplete = digits.length == Constants.OTP_LENGTH
-        )
-    }
-
-    // --- Request OTP (simulated, sets Constants.TEST_OTP for dev/testing) ---
-    fun requestOtp() {
-        if (_uiState.value.isSendingOtp) return
-
-        _uiState.value = _uiState.value.copy(
-            showError = false,
-            isPhoneValidationVisible = false,
-            generalValidationError = false,
-            generalErrorMessage = null
-        )
-
-        validateAndFormatPhoneNumber(_uiState.value.rawPhoneInput)
-
-        if (!_uiState.value.isPhoneValid) {
-            _uiState.value = _uiState.value.copy(
-                showError = true,
-                isPhoneValidationVisible = true,
-                generalValidationError = true
-            )
-            return
-        }
-
-        _uiState.value = _uiState.value.copy(isSendingOtp = true)
-
-        viewModelScope.launch {
-            try {
-                delay(1500)
-
-                _uiState.value = _uiState.value.copy(
-                    isSendingOtp = false,
-                    otpRequestSuccess = true,
-                    showSmsMessage = true,
-                    resendTimerSeconds = 30,
-                    canResendOtp = false,
-                    sentOtp = Constants.TEST_OTP // ✅ dev-only
-                )
-
-                startResendTimer()
-            } catch (e: Exception) {
-                _uiState.value = _uiState.value.copy(
-                    isSendingOtp = false,
-                    generalErrorMessage = "Failed to send OTP. Please try again."
-                )
-            }
-        }
-    }
-
     // --- Handle OTP input (digit by digit) ---
     fun onOtpDigitChange(
         index: Int,
