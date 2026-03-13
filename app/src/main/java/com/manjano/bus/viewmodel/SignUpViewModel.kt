@@ -278,51 +278,81 @@ class SignUpViewModel : ViewModel() {
     fun checkPhoneNumberInFirestore(phone: String, countryIso: String) {
         val db = FirebaseFirestore.getInstance()
 
-        // Normalize entered number (your existing function – unchanged)
-        val normalizedInput = normalizePhoneNumber(phone, countryIso)
+        // Step 1: Normalize user input to our standard format
+        val normalizedInput = normalizeForMatching(phone, countryIso)
+
+        if (normalizedInput.isBlank()) {
+            _isPhoneAllowed.value = false
+            setAlreadyRegisteredError(null)
+            return
+        }
 
         db.collection("parents")
             .get()
             .addOnSuccessListener { documents ->
-                val matched = documents.documents.any { doc ->
-                    val dbNumber = doc.getString("mobileNumber") ?: ""
+                var found = false
 
-                    if (countryIso.equals("KE", ignoreCase = true)) {
-                        // Kenyan numbers: exact match – DO NOT CHANGE
-                        dbNumber == normalizedInput
-                    } else {
-                        // ───────────────────────────────────────────────────────────────
-                        // INTERNATIONAL – fixed & more reliable version
-                        // ───────────────────────────────────────────────────────────────
+                for (doc in documents.documents) {
+                    val storedNumber = doc.getString("mobileNumber") ?: continue
+                    val normalizedStored = normalizeForMatching(storedNumber, countryIso)
 
-                        // Clean both to pure E.164 digits (keep + for comparison)
-                        val dbClean = dbNumber.replace("[^+0-9]".toRegex(), "")
-                        val inputClean = phone.replace("[^+0-9]".toRegex(), "")
+                    if (normalizedStored == normalizedInput) {
+                        found = true
 
-                        // Get country calling code (e.g. "61" for AU, "44" for UK)
-                        val callingCode = CountryRepository.countries
-                            .find { it.isoCode.equals(countryIso, ignoreCase = true) }
-                            ?.callingCode
-                            ?.replace("[^+0-9]".toRegex(), "") // ensure digits only
-                            ?: ""
+                        // Optional: still show "already signed up" if profile looks complete
+                        val parentName = doc.getString("parentName") ?: ""
+                        val hasChild = doc.data?.keys?.any { it.startsWith("childName") } == true
 
-                        // Build expected E.164 from user input
-                        val expectedE164 = when {
-                            inputClean.startsWith("+") -> inputClean
-                            inputClean.startsWith("00") -> "+" + inputClean.drop(2)
-                            inputClean.startsWith("0") -> "+$callingCode${inputClean.drop(1)}"
-                            else -> "+$callingCode$inputClean"
+                        if (parentName.isNotBlank() || hasChild) {
+                            setAlreadyRegisteredError("You’re registered, please Sign-in")
+                        } else {
+                            setAlreadyRegisteredError(null)
                         }
-
-                        // Compare cleaned versions (both should be like +61432756777)
-                        dbClean == expectedE164
+                        break
                     }
                 }
-                _isPhoneAllowed.value = matched
+
+                _isPhoneAllowed.value = found
+                if (!found) {
+                    setAlreadyRegisteredError(null)
+                }
             }
             .addOnFailureListener {
                 _isPhoneAllowed.value = false
+                setAlreadyRegisteredError(null)
             }
+    }
+
+    private fun normalizeForMatching(raw: String, countryIso: String): String {
+        val digits = raw.filter { it.isDigit() }
+
+        return if (countryIso.equals("KE", ignoreCase = true)) {
+            when {
+                digits.length == 9 -> "0$digits"                  // 712345678 → 0712345678
+                digits.length == 10 -> {
+                    if (digits.startsWith("0")) digits           // 0712345678 → 0712345678
+                    else "0$digits"                               // 7123456789 → 07123456789 (rare)
+                }
+
+                digits.startsWith("254") -> {
+                    val rest = digits.drop(3)
+                    if (rest.startsWith("0")) rest else "0$rest"  // 254712345678 → 0712345678
+                }
+
+                else -> digits                                    // fallback – unlikely
+            }
+        } else {
+            // Non-Kenyan: full E.164 with +
+            val countryCode = CountryRepository.countries
+                .find { it.isoCode.equals(countryIso, ignoreCase = true) }?.callingCode ?: ""
+
+            when {
+                raw.startsWith("+") -> raw
+                digits.startsWith("00") -> "+" + digits.drop(2)
+                digits.startsWith("0") -> "+$countryCode${digits.drop(1)}"
+                else -> "+$countryCode$digits"
+            }
+        }
     }
     fun saveDriverProfileIfNeeded(
         phoneNumber: String,
@@ -391,6 +421,7 @@ class SignUpViewModel : ViewModel() {
                 Log.e("🔥", "Firestore query failed", e)
             }
     }
+
     fun saveParentAndChildren(
         parentName: String,
         childrenNames: List<String>,

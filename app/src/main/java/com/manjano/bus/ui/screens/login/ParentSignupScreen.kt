@@ -216,8 +216,9 @@ fun SignupScreen(
     val emailFocusRequester = remember { FocusRequester() }
     val context = androidx.compose.ui.platform.LocalContext.current
     val isPhoneAllowed by signupViewModel.isPhoneAllowed.collectAsState()
+    val alreadyRegisteredError by signupViewModel.alreadyRegisteredError.collectAsState()
     var phoneErrorText by remember { mutableStateOf("") }
-
+    var hasShownRegisteredError by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         parentFocusRequester.requestFocus()
@@ -506,10 +507,17 @@ fun SignupScreen(
                 focusManager = focusManager
             )
         }
-        // Only show the allowed Firestore error message (nothing else)
-        if (phoneErrorText.isNotEmpty()) {
+        // Error display: registered takes highest priority when present,
+        // then local validation errors (invalid format / not allowed)
+        val displayedPhoneError = when {
+            alreadyRegisteredError != null -> alreadyRegisteredError
+            phoneErrorText.isNotEmpty() -> phoneErrorText
+            else -> null
+        }
+
+        if (displayedPhoneError != null) {
             Text(
-                text = phoneErrorText,
+                text = displayedPhoneError,
                 color = Color.Red,
                 fontSize = 12.sp,
                 modifier = Modifier.padding(top = 2.dp)
@@ -602,6 +610,10 @@ fun SignupScreen(
                         signupViewModel.requestOtp()
                         showOtpMessage = true
 
+                        if (alreadyRegisteredError != null) {
+                            phoneFocusRequester.requestFocus()
+                            return@launch
+                        }
                         delay(100)
                         if (scrollState.maxValue > 0) {
                             otpFocusRequester.requestFocus()
