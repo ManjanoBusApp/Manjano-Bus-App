@@ -267,18 +267,13 @@ class SignInViewModel : ViewModel() {
             generalValidationError = false
         )
 
-        // Validate first
-        val rawDigits = _uiState.value.rawPhoneInput.filter { it.isDigit() }
+        val rawInput = _uiState.value.rawPhoneInput
+        val countryIso = _uiState.value.selectedCountry.isoCode
 
-        val isValidLength = when (_uiState.value.selectedCountry.isoCode.uppercase()) {
-            "KE" -> rawDigits.length == 10
-            else -> PhoneNumberUtils.isPossibleNumber(
-                _uiState.value.rawPhoneInput,
-                _uiState.value.selectedCountry.isoCode
-            )
-        }
+        // Strict local validation first (this is the key change)
+        val isValid = PhoneNumberUtils.isValidNumber(rawInput, countryIso)
 
-        if (!isValidLength) {
+        if (!isValid) {
             _uiState.value = _uiState.value.copy(
                 showError = true,
                 phoneValidationMessage = "Invalid phone number",
@@ -293,17 +288,19 @@ class SignInViewModel : ViewModel() {
             return
         }
 
+        // Only if strictly valid → proceed to Firestore check
         viewModelScope.launch {
-            // Firestore check if not already done
             checkPhoneNumberInFirestore(
-                phone = _uiState.value.rawPhoneInput,
-                countryIso = _uiState.value.selectedCountry.isoCode
+                phone = rawInput,
+                countryIso = countryIso
             )
 
+            // Wait for result
             while (_isPhoneAllowed.value == null) {
                 delay(50)
             }
-            // Determine error or proceed
+
+            // Decide based on Firestore
             when {
                 _isPreRegistered.value == false -> {
                     _uiState.value = _uiState.value.copy(
@@ -311,7 +308,6 @@ class SignInViewModel : ViewModel() {
                         phoneValidationMessage = "Can't proceed, contact the school",
                         isPhoneValidationVisible = true
                     )
-                    return@launch
                 }
 
                 _isSignedUp.value == false -> {
@@ -320,19 +316,19 @@ class SignInViewModel : ViewModel() {
                         phoneValidationMessage = "You have no account, please sign-up first",
                         isPhoneValidationVisible = true
                     )
-                    return@launch
                 }
 
                 else -> {
-                    // Clear errors and send OTP
+                    // Valid + exists + signed up → send OTP
                     _uiState.value = _uiState.value.copy(
                         showError = false,
                         phoneValidationMessage = null,
                         isPhoneValidationVisible = false,
                         isSendingOtp = true
                     )
+
                     try {
-                        delay(1500) // simulate OTP send
+                        delay(1500) // simulate send
 
                         _uiState.value = _uiState.value.copy(
                             isSendingOtp = false,
@@ -340,7 +336,7 @@ class SignInViewModel : ViewModel() {
                             showSmsMessage = true,
                             resendTimerSeconds = 30,
                             canResendOtp = false,
-                            sentOtp = Constants.TEST_OTP // dev-only
+                            sentOtp = Constants.TEST_OTP // dev only
                         )
 
                         startResendTimer()

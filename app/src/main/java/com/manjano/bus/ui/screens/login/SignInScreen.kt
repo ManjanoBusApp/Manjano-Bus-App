@@ -275,41 +275,38 @@ fun SignInScreen(
                     )
 
                     val isCompleteEnough = uiState.rawPhoneInput.isNotBlank() &&
-                            uiState.rawPhoneInput.length >= 8  // basic length check to avoid false "incomplete"
+                            uiState.rawPhoneInput.length >= 8
 
                     scope.launch {
-                        // Force fresh Firestore check on button press
+                        phoneErrorText = ""
+
+                        // Strict local validation first — exit immediately if invalid
+                        if (!isFormatValid || !isCompleteEnough) {
+                            phoneErrorText = "Invalid phone number"
+                            phoneFocusRequester.requestFocus()
+                            return@launch  // ← stops everything below
+                        }
+
+                        // Only if valid → check Firestore
                         viewModel.checkPhoneNumberInFirestore(
                             phone = uiState.rawPhoneInput,
                             countryIso = uiState.selectedCountry.isoCode
                         )
 
-                        // Wait up to ~1.5s for Firestore result
+                        // Wait for result
                         for (i in 1..15) {
                             delay(100)
-                            if (isPhoneAllowed != null) {
-                                break  // compiler is happy with 'break' here
-                            }
+                            if (isPhoneAllowed != null) break
                         }
 
-                        // Now evaluate based on final states
-                        phoneErrorText = ""
-
-                        if (!isFormatValid || !isCompleteEnough) {
-                            phoneErrorText = "Invalid phone number"
-                            phoneFocusRequester.requestFocus()
-                            return@launch
-                        }
-
-                        // ── NEW priority check using the three states ──
+                        // Evaluate Firestore only if we reached here (valid format)
                         when {
                             isPhoneAllowed != true -> {
                                 when {
                                     isPreRegistered == true && isSignedUp == false -> {
                                         phoneErrorText = "You have no account, please sign-up first"
                                     }
-
-                                    isPreRegistered == false -> {
+                                    else -> {
                                         phoneErrorText = "Can't proceed, contact the school"
                                     }
                                 }
@@ -318,42 +315,16 @@ fun SignInScreen(
                             }
                         }
 
-                        // All good → proceed to OTP
+                        // Success path
                         phoneErrorText = ""
                         keyboardController?.hide()
                         focusManager.clearFocus()
                         viewModel.requestOtp()
 
-
-                        // Clear previous errors first
-                        phoneErrorText = ""
-
-                        if (!isFormatValid || !isCompleteEnough) {
-                            // Format or incomplete → show "Invalid phone number" after click
-                            phoneErrorText = "Invalid phone number"
-                            phoneFocusRequester.requestFocus()
-                            return@launch
-                        }
-
-                        // Now check Firestore existence (only if format is OK)
-                        if (isPhoneAllowed != true) {
-                            phoneErrorText = "Can't proceed, contact the school"
-                            phoneFocusRequester.requestFocus()
-                            return@launch
-                        }
-
-                        // All good → proceed
-                        phoneErrorText = ""
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                        viewModel.requestOtp()
-
-                        scope.launch {
-                            delay(300)
-                            focusManager.clearFocus(force = true)
-                            otpFocusRequester.requestFocus()
-                            scrollState.animateScrollTo(scrollState.maxValue)
-                        }
+                        delay(300)
+                        focusManager.clearFocus(force = true)
+                        otpFocusRequester.requestFocus()
+                        scrollState.animateScrollTo(scrollState.maxValue)
                     }
                 },
                 scope = scope
