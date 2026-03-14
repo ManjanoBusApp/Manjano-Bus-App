@@ -71,108 +71,96 @@ class ParentSignupViewModel : ViewModel() {
             val newChildKeys =
                 childrenList.map { it.lowercase().replace(Regex("[^a-z0-9]"), "_") }
 
-            parentChildrenRef.get().addOnSuccessListener { snapshot ->
-
-                val existingKeys =
-                    snapshot.children.mapNotNull { it.key }.toSet()
-
-                val newKeysSet = newChildKeys.toSet()
-
-                val keysToRemove = existingKeys - newKeysSet
-
-                if (keysToRemove.isNotEmpty()) {
-
-                    val deletionMap = mutableMapOf<String, Any?>()
-
-                    keysToRemove.forEach { removedKey ->
-
-                        deletionMap["parents/$parentKey/children/$removedKey"] = null
-                        deletionMap["students/$removedKey"] = null
-                    }
-
-                    rootRef.updateChildren(deletionMap)
+            rootRef.child("parents").get().addOnSuccessListener { allParentsSnapshot ->
+                // Case-insensitive and trim-aware check for existing parent key
+                val parentExists = allParentsSnapshot.children.any {
+                    it.key?.equals(parentKey, ignoreCase = true) == true
                 }
 
-                if (childrenList.isEmpty()) return@addOnSuccessListener
+                if (parentExists) {
+                    Log.d(
+                        "🔥",
+                        "Blockage: Parent $parentKey already exists in RDB. Preventing duplicate write."
+                    )
+                    return@addOnSuccessListener
+                }
 
-                val storage =
-                    FirebaseStorage.getInstance().reference.child("Children Images")
+                parentChildrenRef.get().addOnSuccessListener { snapshot ->
+                    val existingKeys = snapshot.children.mapNotNull { it.key }.toSet()
+                    val newKeysSet = newChildKeys.toSet()
+                    val keysToRemove = existingKeys - newKeysSet
 
-                val imageBaseNames = mutableMapOf<String, String>()
-
-                storage.listAll().addOnSuccessListener { listResult ->
-
-                    listResult.items.forEach { item ->
-                        val fullName = item.name
-                        val baseName = fullName.substringBeforeLast('.')
-                        imageBaseNames[normalizeName(baseName)] = fullName
+                    if (keysToRemove.isNotEmpty()) {
+                        val deletionMap = mutableMapOf<String, Any?>()
+                        keysToRemove.forEach { removedKey ->
+                            deletionMap["parents/$parentKey/children/$removedKey"] = null
+                            deletionMap["students/$removedKey"] = null
+                        }
+                        rootRef.updateChildren(deletionMap)
                     }
 
-                    childrenList.forEach { childName ->
+                    if (childrenList.isEmpty()) return@addOnSuccessListener
+                    val storage = FirebaseStorage.getInstance().reference.child("Children Images")
+                    val imageBaseNames = mutableMapOf<String, String>()
 
-                        val childKey =
-                            childName.lowercase().replace(Regex("[^a-z0-9]"), "_")
-
-                        val sanitizedChildName = normalizeName(childName)
-
-                        val chosenBase = imageBaseNames.keys.find { key ->
-                            val firebaseTokens = key.split(Regex("\\W+")).filter { it.isNotBlank() }
-                            val childTokens =
-                                sanitizedChildName.split(Regex("\\W+")).filter { it.isNotBlank() }
-                            // Match if all firebaseTokens exist in childTokens OR vice versa
-                            firebaseTokens.all { token -> childTokens.contains(token) } ||
-                                    childTokens.all { token -> firebaseTokens.contains(token) }
+                    storage.listAll().addOnSuccessListener { listResult ->
+                        listResult.items.forEach { item ->
+                            val fullName = item.name
+                            val baseName = fullName.substringBeforeLast('.')
+                            imageBaseNames[normalizeName(baseName)] = fullName
                         }
 
-                        val fileRef = if (chosenBase != null) {
-                            storage.child(imageBaseNames[chosenBase]!!)
-                        } else {
-                            FirebaseStorage.getInstance().reference
-                                .child("Default Image")
-                                .child("defaultchild.png")
-                        }
+                        childrenList.forEach { childName ->
+                            val childKey = childName.lowercase().replace(Regex("[^a-z0-9]"), "_")
+                            val sanitizedChildName = normalizeName(childName)
+                            val chosenBase = imageBaseNames.keys.find { key ->
+                                val firebaseTokens =
+                                    key.split(Regex("\\W+")).filter { it.isNotBlank() }
+                                val childTokens = sanitizedChildName.split(Regex("\\W+"))
+                                    .filter { it.isNotBlank() }
+                                firebaseTokens.all { token -> childTokens.contains(token) } ||
+                                        childTokens.all { token -> firebaseTokens.contains(token) }
+                            }
 
-                        fileRef.downloadUrl.addOnCompleteListener { task ->
+                            val fileRef = if (chosenBase != null) {
+                                storage.child(imageBaseNames[chosenBase]!!)
+                            } else {
+                                FirebaseStorage.getInstance().reference.child("Default Image")
+                                    .child("defaultchild.png")
+                            }
 
-                            val finalPhotoUrl =
-                                if (task.isSuccessful) task.result.toString()
+                            fileRef.downloadUrl.addOnCompleteListener { task ->
+                                val finalPhotoUrl = if (task.isSuccessful) task.result.toString()
                                 else "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Default%20Image%2Fdefaultchild.png?alt=media"
 
-                            val childData = hashMapOf(
-                                "active" to true,
-                                "childId" to childKey,
-                                "displayName" to childName,
-                                "eta" to "Arriving in 5 minutes",
-                                "parentName" to parentName,
-                                "photoUrl" to finalPhotoUrl,
-                                "status" to "On Route"
-                            )
+                                val childData = hashMapOf(
+                                    "active" to true,
+                                    "childId" to childKey,
+                                    "displayName" to childName,
+                                    "eta" to "Arriving in 5 minutes",
+                                    "parentName" to parentName,
+                                    "photoUrl" to finalPhotoUrl,
+                                    "status" to "On Route"
+                                )
 
-                            val updates = hashMapOf<String, Any>(
-                                "parents/$parentKey/children/$childKey" to childData,
-                                "students/$childKey" to childData
-                            )
+                                val updates = hashMapOf<String, Any>(
+                                    "parents/$parentKey/children/$childKey" to childData,
+                                    "students/$childKey" to childData
+                                )
 
-                            rootRef.updateChildren(updates)
-                                .addOnSuccessListener {
-
+                                rootRef.updateChildren(updates).addOnSuccessListener {
                                     Log.d(
                                         "🔥",
                                         "Schema Sync Success: $childKey for Parent: $parentName"
                                     )
                                 }
+                            }
                         }
                     }
                 }
             }
-
         } catch (e: Exception) {
-
-            Log.e(
-                "🔥",
-                "ParentSignupViewModel CRITICAL FAILURE",
-                e
-            )
+            Log.e("🔥", "ParentSignupViewModel CRITICAL FAILURE", e)
         }
     }
 }

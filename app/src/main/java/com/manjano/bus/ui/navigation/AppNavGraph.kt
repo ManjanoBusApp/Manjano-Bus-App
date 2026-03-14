@@ -103,9 +103,20 @@ fun AppNavGraph(navController: NavHostController) {
 
             Log.d("ParentDashboard", "Route hit! parent=$parentName children=$childrenNames status=$status")
 
+            val parentDashboardViewModel: com.manjano.bus.ui.screens.home.ParentDashboardViewModel =
+                hiltViewModel()
+
+            // The Handshake: Use the Full Name to start the DB listeners
+            androidx.compose.runtime.LaunchedEffect(parentName) {
+                if (parentName.isNotEmpty()) {
+                    parentDashboardViewModel.initializeParent(parentName)
+                }
+            }
+
             ParentDashboardScreen(
                 navController = navController,
-                navBackStackEntry = backStackEntry
+                navBackStackEntry = backStackEntry,
+                viewModel = parentDashboardViewModel // Ensure your Screen accepts this instance
             )
         }
 
