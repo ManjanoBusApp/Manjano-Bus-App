@@ -120,7 +120,6 @@ class ParentDashboardViewModel(
                         _parentDisplayName.value = latestName
                     }
                 }
-
                 override fun onCancelled(error: DatabaseError) {}
             })
     }
