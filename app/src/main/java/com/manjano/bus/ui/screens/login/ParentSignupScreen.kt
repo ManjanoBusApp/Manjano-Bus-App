@@ -218,6 +218,7 @@ fun SignupScreen(
     val isPhoneAllowed by signupViewModel.isPhoneAllowed.collectAsState()
     val alreadyRegisteredError by signupViewModel.alreadyRegisteredError.collectAsState()
     var phoneErrorText by remember { mutableStateOf("") }
+    var phoneErrorInvalid by remember { mutableStateOf(false) }
     var hasShownRegisteredError by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
@@ -488,6 +489,9 @@ fun SignupScreen(
                     if (focusState.isFocused) {
                         phoneErrorText = ""
                         phoneError = false
+                        phoneErrorInvalid = false
+                        hasTouchedPhone =
+                            true   // show errors as soon as user interacts with phone field
                     }
                 }
         ) {
@@ -497,8 +501,9 @@ fun SignupScreen(
                 onCountrySelected = { selectedCountry = it },
                 onPhoneNumberChange = { newNumber ->
                     phoneNumber = newNumber
-                    phoneErrorText = ""      // ← KEEP this (clear on typing is good)
-                    phoneError = false       // ← KEEP this
+                    phoneErrorText = ""
+                    phoneError = false
+                    phoneErrorInvalid = false   // clear format error while typing
                 },
                 showError = false,
                 onShowErrorChange = { /* ignore */ },
@@ -507,23 +512,36 @@ fun SignupScreen(
                 focusManager = focusManager
             )
         }
-        // Error display: registered takes highest priority when present,
-        // then local validation errors (invalid format / not allowed)
-        val displayedPhoneError = when {
-            alreadyRegisteredError != null -> alreadyRegisteredError
-            phoneErrorText.isNotEmpty() -> phoneErrorText
-            else -> null
-        }
+        if (hasTouchedPhone) {
+            when {
+                phoneErrorInvalid -> {
+                    Text(
+                        text = "Invalid phone number",
+                        color = Color.Red,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
 
-        if (displayedPhoneError != null) {
-            Text(
-                text = displayedPhoneError,
-                color = Color.Red,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-        }
+                phoneErrorText.isNotEmpty() -> {
+                    Text(
+                        text = phoneErrorText,
+                        color = Color.Red,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
 
+                alreadyRegisteredError != null -> {
+                    Text(
+                        text = alreadyRegisteredError!!,
+                        color = Color.Red,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
+                }
+            }
+        }
         LaunchedEffect(Unit) {
             // Only request focus for phone when parent and child fields are valid and OTP is not yet requested
             if (parentName.text.isNotEmpty() && childrenNames.all { it.text.isNotEmpty() }) {
@@ -590,17 +608,28 @@ fun SignupScreen(
                     emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
                         .matches()
 
-                    // --- Step 4: Reset phone error UI ---
+                    // --- Step 4: Reset phone error UI + mark as touched ---
                     phoneError = false
                     phoneErrorText = ""
+                    hasTouchedPhone = true
 
-                    // --- Step 5: Only allow Firestore-authorized numbers ---
-                    val phoneNotAllowed = isPhoneAllowed != true
-                    if (phoneNotAllowed) {
-                        phoneErrorText = "Can't proceed, contact the school"
-                        phoneError = true
+                    // Local format validation first
+                    val isValidFormat = try {
+                        PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                    } catch (e: Exception) {
+                        false
                     }
 
+                    phoneErrorInvalid = !isValidFormat && phoneNumber.isNotBlank()
+
+                    // Then Firestore / school allowance check
+                    val phoneNotAllowed = isPhoneAllowed != true
+                    if (phoneNotAllowed && isValidFormat) {
+                        phoneErrorText = "Can't proceed, contact the school"
+                        phoneError = true
+                    } else if (!isValidFormat) {
+                        phoneErrorText = ""   // let the invalid message show via phoneErrorInvalid
+                    }
                     // --- Step 6: Overall validity check ---
                     val canProceed =
                         !parentError && !hasEmptyChild && !emailError && !phoneNotAllowed

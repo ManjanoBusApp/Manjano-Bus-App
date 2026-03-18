@@ -142,21 +142,54 @@ fun SignInScreen(
                     }
 
                 } else if (role == "parent") {
-                    val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
-                    val parentName = prefs.getString("parent_name", "") ?: ""
-                    val childrenNames = prefs.getString("children_names", "") ?: ""
-                    val parentFirstName = parentName.split(" ").firstOrNull() ?: parentName
+                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    val rawPhone = uiState.rawPhoneInput
+                    val countryIso = uiState.selectedCountry.isoCode
+                    val normalizedPhone = viewModel.normalizePhoneNumber(rawPhone, countryIso)
 
-                    val encodedParent =
-                        URLEncoder.encode(parentFirstName, StandardCharsets.UTF_8.toString())
-                    val encodedChildren =
-                        URLEncoder.encode(childrenNames, StandardCharsets.UTF_8.toString())
-                    val encodedStatus =
-                        URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
+                    db.collection("parents")
+                        .whereEqualTo("mobileNumber", normalizedPhone)
+                        .limit(1)
+                        .get()
+                        .addOnSuccessListener { documents ->
+                            val doc = documents.documents.firstOrNull()
+                            if (doc != null) {
+                                val parentName = doc.getString("parentName") ?: ""
+                                // Extract children names correctly from the fields childName1, childName2, etc.
+                                val childrenList = mutableListOf<String>()
+                                for (i in 1..10) {
+                                    val child = doc.getString("childName$i")
+                                    if (!child.isNullOrBlank()) childrenList.add(child)
+                                }
+                                val childrenNames = childrenList.joinToString(",")
 
-                    navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
-                        popUpTo("signin/parent") { inclusive = true }
-                    }
+                                // Extract the full parentName for the RDB Handshake
+                                val parentFullName = doc.getString("parentName") ?: ""
+
+                                // Encode the Full Name so the Dashboard ViewModel can generate the correct Database Key
+                                val encodedFullParent = URLEncoder.encode(
+                                    parentFullName,
+                                    StandardCharsets.UTF_8.toString()
+                                )
+                                val encodedChildren = URLEncoder.encode(
+                                    childrenNames,
+                                    StandardCharsets.UTF_8.toString()
+                                )
+                                val encodedStatus =
+                                    URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
+
+                                // Clear sign-in/up viewmodel state before navigating to ensure no "save" triggers remain active
+                                viewModel.onNavigationConsumed()
+
+                                // Navigate using the Full Name as the 'parentName' argument
+                                navController.navigate("parent_dashboard/$encodedFullParent/$encodedChildren/$encodedStatus") {
+                                    popUpTo(navController.graph.startDestinationId) {
+                                        inclusive = true
+                                    }
+                                    launchSingleTop = true
+                                }
+                            }
+                        }
                 }
             }.onFailure { throwable ->
                 android.util.Log.e("NavigationError", "Failed to navigate to dashboard", throwable)
@@ -275,41 +308,38 @@ fun SignInScreen(
                     )
 
                     val isCompleteEnough = uiState.rawPhoneInput.isNotBlank() &&
-                            uiState.rawPhoneInput.length >= 8  // basic length check to avoid false "incomplete"
+                            uiState.rawPhoneInput.length >= 8
 
                     scope.launch {
-                        // Force fresh Firestore check on button press
+                        phoneErrorText = ""
+
+                        // Strict local validation first — exit immediately if invalid
+                        if (!isFormatValid || !isCompleteEnough) {
+                            phoneErrorText = "Invalid phone number"
+                            phoneFocusRequester.requestFocus()
+                            return@launch  // ← stops everything below
+                        }
+
+                        // Only if valid → check Firestore
                         viewModel.checkPhoneNumberInFirestore(
                             phone = uiState.rawPhoneInput,
                             countryIso = uiState.selectedCountry.isoCode
                         )
 
-                        // Wait up to ~1.5s for Firestore result
+                        // Wait for result
                         for (i in 1..15) {
                             delay(100)
-                            if (isPhoneAllowed != null) {
-                                break  // compiler is happy with 'break' here
-                            }
+                            if (isPhoneAllowed != null) break
                         }
 
-                        // Now evaluate based on final states
-                        phoneErrorText = ""
-
-                        if (!isFormatValid || !isCompleteEnough) {
-                            phoneErrorText = "Invalid phone number"
-                            phoneFocusRequester.requestFocus()
-                            return@launch
-                        }
-
-                        // ── NEW priority check using the three states ──
+                        // Evaluate Firestore only if we reached here (valid format)
                         when {
                             isPhoneAllowed != true -> {
                                 when {
                                     isPreRegistered == true && isSignedUp == false -> {
                                         phoneErrorText = "You have no account, please sign-up first"
                                     }
-
-                                    isPreRegistered == false -> {
+                                    else -> {
                                         phoneErrorText = "Can't proceed, contact the school"
                                     }
                                 }
@@ -318,42 +348,16 @@ fun SignInScreen(
                             }
                         }
 
-                        // All good → proceed to OTP
+                        // Success path
                         phoneErrorText = ""
                         keyboardController?.hide()
                         focusManager.clearFocus()
                         viewModel.requestOtp()
 
-
-                        // Clear previous errors first
-                        phoneErrorText = ""
-
-                        if (!isFormatValid || !isCompleteEnough) {
-                            // Format or incomplete → show "Invalid phone number" after click
-                            phoneErrorText = "Invalid phone number"
-                            phoneFocusRequester.requestFocus()
-                            return@launch
-                        }
-
-                        // Now check Firestore existence (only if format is OK)
-                        if (isPhoneAllowed != true) {
-                            phoneErrorText = "Can't proceed, contact the school"
-                            phoneFocusRequester.requestFocus()
-                            return@launch
-                        }
-
-                        // All good → proceed
-                        phoneErrorText = ""
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                        viewModel.requestOtp()
-
-                        scope.launch {
-                            delay(300)
-                            focusManager.clearFocus(force = true)
-                            otpFocusRequester.requestFocus()
-                            scrollState.animateScrollTo(scrollState.maxValue)
-                        }
+                        delay(300)
+                        focusManager.clearFocus(force = true)
+                        otpFocusRequester.requestFocus()
+                        scrollState.animateScrollTo(scrollState.maxValue)
                     }
                 },
                 scope = scope

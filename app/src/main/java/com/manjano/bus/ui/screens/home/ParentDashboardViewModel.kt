@@ -94,16 +94,36 @@ class ParentDashboardViewModel(
 
     fun initializeParent(rawParentName: String) {
         val initialKey = sanitizeKey(rawParentName)
-        if (_parentKey.value.isEmpty()) {
-            _parentKey.value = initialKey
-            database.child("parents").child(initialKey).child("_displayName").get().addOnSuccessListener { snapshot ->
-                if (!snapshot.exists()) {
-                    database.child("parents").child(initialKey).child("_displayName").setValue(rawParentName)
+        _parentKey.value = initialKey
+
+        // 1. Get the current RDB name first to see if Admin changed it
+        database.child("parents").child(initialKey).child("_displayName").get()
+            .addOnSuccessListener { snapshot ->
+                if (snapshot.exists()) {
+                    // Admin has already set a name (e.g., "Joyce"), use it!
+                    _parentDisplayName.value =
+                        snapshot.getValue(String::class.java) ?: rawParentName
+                } else {
+                    // First time sign-in: Save the name from Firestore to RDB
+                    database.child("parents").child(initialKey).child("_displayName")
+                        .setValue(rawParentName)
+                    _parentDisplayName.value = rawParentName
                 }
             }
-        }
-    }
 
+        // 2. Keep the Live Listener active for real-time Admin changes
+        database.child("parents").child(initialKey).child("_displayName")
+            .addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val latestName = snapshot.getValue(String::class.java)
+                    if (!latestName.isNullOrBlank()) {
+                        _parentDisplayName.value = latestName
+                    }
+                }
+
+                override fun onCancelled(error: DatabaseError) {}
+            })
+    }
     private val _parentDisplayName = MutableStateFlow("")
     val parentDisplayName: StateFlow<String> get() = _parentDisplayName
 
@@ -308,23 +328,33 @@ class ParentDashboardViewModel(
                                     )
                                 } else {
                                     _parentDisplayName.value = remoteName
-                                    val targetKey = sanitizeKey(remoteName)
-                                    if (key != targetKey && !isMigrating && targetKey.isNotEmpty()) {
-                                        isMigrating = true
-                                        currentParentRef.get().addOnSuccessListener { dataSnap ->
-                                            if (dataSnap.exists()) {
-                                                database.child("parents").child(targetKey)
-                                                    .setValue(dataSnap.value).addOnSuccessListener {
-                                                        _parentKey.value = targetKey
-                                                        currentParentRef.removeValue()
-                                                            .addOnCompleteListener {
-                                                                isMigrating = false
-                                                            }
-                                                    }
+                                    Log.d("🔥", "UI Greeting updated to: $remoteName")
+
+                                    // CASCADE UPDATE: Update the parent name stored inside each child's node
+                                    // This ensures the Driver Dashboard shows the updated name (e.g., 'Joyce')
+                                    childrenRef.get().addOnSuccessListener { childrenSnapshot ->
+                                        if (childrenSnapshot.exists()) {
+                                            val updates = mutableMapOf<String, Any>()
+                                            childrenSnapshot.children.forEach { child ->
+                                                val childKey = child.key ?: return@forEach
+                                                // Update the parentName field inside the child's RDB node
+                                                updates["$childKey/parentName"] = remoteName
+
+                                                // Also update the global /students node for the driver
+                                                database.child("students").child(childKey)
+                                                    .child("parentName").setValue(remoteName)
                                             }
+                                            childrenRef.updateChildren(updates)
+                                                .addOnSuccessListener {
+                                                    Log.d(
+                                                        "🔥",
+                                                        "Children nodes updated with new parent name: $remoteName"
+                                                    )
+                                                }
                                         }
                                     }
                                 }
+
                             }
 
                             override fun onCancelled(error: DatabaseError) {
