@@ -131,16 +131,30 @@ fun SignInScreen(
             runCatching {
 
                 if (role == "driver") {
-                    val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
-                    val driverName = prefs.getString("driver_name", "") ?: "Driver"
-                    val driverPhone = prefs.getString("driver_phone", "") ?: ""
+                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    val rawPhone = uiState.rawPhoneInput
+                    val countryIso = uiState.selectedCountry.isoCode
+                    val normalizedPhone = viewModel.normalizePhoneNumber(rawPhone, countryIso)
 
-                    val encodedDriverName =
-                        URLEncoder.encode(driverName, StandardCharsets.UTF_8.toString())
-                    navController.navigate("driver_dashboard/$driverPhone/$encodedDriverName") {
-                        popUpTo("signin/driver") { inclusive = true }
-                    }
+                    db.collection("drivers")
+                        .whereEqualTo("mobileNumber", normalizedPhone)
+                        .limit(1)
+                        .get()
+                        .addOnSuccessListener { documents ->
+                            val doc = documents.documents.firstOrNull()
+                            if (doc != null) {
+                                val driverName = doc.getString("driverName") ?: "Driver"
+                                val encodedDriverName =
+                                    URLEncoder.encode(driverName, StandardCharsets.UTF_8.toString())
 
+                                // Clear sign-in/up viewmodel state before navigating to ensure no "save" triggers remain active
+                                viewModel.onNavigationConsumed()
+
+                                navController.navigate("driver_dashboard/$normalizedPhone/$encodedDriverName") {
+                                    popUpTo("signin/driver") { inclusive = true }
+                                }
+                            }
+                        }
                 } else if (role == "parent") {
                     val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
                     val rawPhone = uiState.rawPhoneInput
