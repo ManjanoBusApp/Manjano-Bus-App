@@ -935,7 +935,7 @@ fun ResendTimerSection(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Resend code in ${String.format(Locale.getDefault(), "%02d", timer)}",
+                    text = "Resend Code in ${String.format(Locale.getDefault(), "%02d", timer)}",
                     color = Color.Black,
                     fontSize = 14.sp
                 )
@@ -956,7 +956,7 @@ fun ResendTimerSection(
                 )
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = "Resend code",
+                    text = "Resend Code",
                     color = appPurple,
                     fontWeight = FontWeight.Bold,
                     textDecoration = TextDecoration.Underline,

@@ -85,6 +85,12 @@ import com.google.firebase.firestore.SetOptions
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.Icon
 
 
 @Composable
@@ -220,6 +226,16 @@ fun SignupScreen(
     var phoneErrorText by remember { mutableStateOf("") }
     var phoneErrorInvalid by remember { mutableStateOf(false) }
     var hasShownRegisteredError by remember { mutableStateOf(false) }
+    var isSendingVerification by remember { mutableStateOf(false) }
+    var verificationSent by remember { mutableStateOf(false) }
+    var emailCooldown by remember { mutableStateOf(false) }
+
+    // --- Email + Resend Section (Fixed) ---
+    var emailTimer by remember { mutableStateOf(0) }
+    var showRedMessage by remember { mutableStateOf(false) }
+    var canResendEmail by remember { mutableStateOf(false) }
+    var hasClickedSendEmail by remember { mutableStateOf(false) } // Track first click
+    val emailShakeOffset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
 
     LaunchedEffect(Unit) {
         parentFocusRequester.requestFocus()
@@ -444,12 +460,21 @@ fun SignupScreen(
         Spacer(modifier = Modifier.height(16.dp))
 
         // Email
+
+
         OutlinedTextField(
             value = email,
             onValueChange = {
                 hasTouchedEmail = true
                 email = it
-                emailError = false // hide error as soon as user types
+                emailError = false
+
+                // 🔥 FULL RESET when user edits email
+                verificationSent = false
+                hasClickedSendEmail = false
+                canResendEmail = false
+                emailTimer = 0
+                showRedMessage = false
             },
             placeholder = { Text("name@email.com") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
@@ -469,16 +494,137 @@ fun SignupScreen(
                 },
             textStyle = TextStyle(fontSize = 16.sp),
             shape = RoundedCornerShape(12.dp),
-            isError = emailError
+            isError = emailError,
+            enabled = true
         )
+
         if (emailError) Text(
             "Please enter a valid email address",
             color = Color.Red,
             fontSize = 12.sp
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
 
+        if (hasClickedSendEmail && showRedMessage) {
+            Text(
+                text = "Check email & tap on link sent",
+                color = Color.Red,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(12.dp))
+
+// --- Send Email Button (single) ---
+        Button(
+            onClick = {
+                verificationSent = true
+                hasClickedSendEmail = true
+                showRedMessage = true
+                canResendEmail = false
+                emailTimer = 30
+            },
+            enabled = emailTimer == 0,
+            modifier = Modifier
+                .height(44.dp)
+                .width(150.dp)
+                .align(Alignment.End)
+                .offset(x = emailShakeOffset.floatValue.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (emailTimer == 0) Color.Black else Color.LightGray,
+                contentColor = Color.White,
+                disabledContainerColor = Color.LightGray
+            ),
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Text(
+                text = if (emailTimer > 0) "Sending..." else "Send Email Link",
+                color = Color.White,
+                fontSize = 12.sp
+            )
+        }
+// --- Resend Email / Timer (Clean Swap Version) ---
+        if (hasClickedSendEmail) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+
+                if (hasClickedSendEmail) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+
+                        if (!canResendEmail && emailTimer > 0) {
+                            // ⏰ TIMER STATE
+                            Text(
+                                text = "⏰ Resend code in ${
+                                    String.format(
+                                        Locale.getDefault(),
+                                        "%02d",
+                                        emailTimer
+                                    )
+                                }",
+                                color = Color.Black,
+                                fontSize = 14.sp
+                            )
+                        } else {
+                            // ⏰ RESEND STATE
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = "⏰ ",
+                                    fontSize = 14.sp,
+                                    color = Color(0xFF800080)
+                                )
+
+                                Text(
+                                    text = "Resend Email",
+                                    color = Color(0xFF800080),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    textDecoration = TextDecoration.Underline,
+                                    modifier = Modifier.clickable {
+                                        verificationSent = true
+                                        showRedMessage = true
+                                        canResendEmail = false
+                                        emailTimer = 30
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+// --- Countdown & red text handler ---
+        LaunchedEffect(showRedMessage) {
+            if (showRedMessage) {
+                delay(5000)
+                showRedMessage = false
+            }
+        }
+
+        LaunchedEffect(emailTimer) {
+            if (emailTimer > 0) {
+                delay(1000)
+                emailTimer--
+            } else if (hasClickedSendEmail) {
+                canResendEmail = true
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
 
         val phoneFocusRequester = remember { FocusRequester() }
 
@@ -873,7 +1019,7 @@ fun SignupScreen(
                         }
                     }
                 }
-            }, // <-- IMPORTANT: comma here, closes onClick lambda
+            },
             enabled = isFormValid && phoneErrorText.isEmpty(),
             modifier = Modifier
                 .fillMaxWidth()
@@ -883,7 +1029,11 @@ fun SignupScreen(
                 disabledContainerColor = Color.LightGray
             )
         ) {
-            Text("Continue", color = Color.White, fontSize = 16.sp)
+            Text(
+                text = if (isSendingVerification) "Sending..." else "Continue",
+                color = Color.White,
+                fontSize = 16.sp
+            )
         }
         Spacer(modifier = Modifier.height(12.dp))
 
