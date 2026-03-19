@@ -33,7 +33,8 @@ gradle-*.zip
 # Kotlin
 # =========================
 *.kotlin_module
-
+# Kotlin build/cache folder
+.kotlin/
 # =========================
 # Logs, crash reports
 # =========================
