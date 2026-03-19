@@ -636,8 +636,7 @@ fun SignupScreen(
                         phoneErrorText = ""
                         phoneError = false
                         phoneErrorInvalid = false
-                        hasTouchedPhone =
-                            true   // show errors as soon as user interacts with phone field
+                        hasTouchedPhone = true
                     }
                 }
         ) {
@@ -649,9 +648,10 @@ fun SignupScreen(
                     phoneNumber = newNumber
                     phoneErrorText = ""
                     phoneError = false
-                    phoneErrorInvalid = false   // clear format error while typing
+                    phoneErrorInvalid = false
+                    hasTouchedPhone = true
                 },
-                showError = false,
+                showError = phoneError || phoneErrorInvalid || phoneErrorText.isNotEmpty(),
                 onShowErrorChange = { /* ignore */ },
                 phoneFocusRequester = phoneFocusRequester,
                 keyboardController = keyboardController,
@@ -659,33 +659,21 @@ fun SignupScreen(
             )
         }
         if (hasTouchedPhone) {
-            when {
-                phoneErrorInvalid -> {
-                    Text(
-                        text = "Invalid phone number",
-                        color = Color.Red,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-
-                phoneErrorText.isNotEmpty() -> {
-                    Text(
-                        text = phoneErrorText,
-                        color = Color.Red,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
-
-                alreadyRegisteredError != null -> {
-                    Text(
-                        text = alreadyRegisteredError!!,
-                        color = Color.Red,
-                        fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 2.dp)
-                    )
-                }
+            val showErrorText = when {
+                phoneErrorInvalid || phoneNumber.isBlank() -> "Please enter a valid phone number"
+                phoneErrorText.isNotEmpty() -> phoneErrorText
+                alreadyRegisteredError != null -> alreadyRegisteredError!!
+                else -> null
+            }
+            if (showErrorText != null) {
+                Text(
+                    text = showErrorText,
+                    color = Color.Red,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp)
+                )
             }
         }
         LaunchedEffect(Unit) {
