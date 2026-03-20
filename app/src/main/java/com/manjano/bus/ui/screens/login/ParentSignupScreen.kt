@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -37,11 +38,14 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
@@ -66,32 +70,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
+import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.manjano.bus.R
 import com.manjano.bus.models.CountryRepository
 import com.manjano.bus.utils.Constants
 import com.manjano.bus.utils.PhoneNumberUtils
+import com.manjano.bus.viewmodel.ParentSignupViewModel
 import com.manjano.bus.viewmodel.SignUpViewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import com.manjano.bus.models.Country
-import androidx.compose.runtime.mutableStateListOf
-import androidx.compose.runtime.snapshots.SnapshotStateList
-import com.manjano.bus.viewmodel.ParentSignupViewModel
-import androidx.lifecycle.viewmodel.compose.viewModel
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.SetOptions
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
-import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material3.Icon
-
 
 @Composable
 fun SignupOtpInputRow(
@@ -727,9 +720,12 @@ fun SignupScreen(
             )
         }
 
+        val isOtpCoolingDown by remember(uiState.resendTimerSeconds) {
+            derivedStateOf { uiState.resendTimerSeconds > 0 }
+        }
         ActionRow(
             rememberMe = uiState.rememberMe,
-            isSendingOtp = uiState.isSendingOtp,
+            isSendingOtp = uiState.isSendingOtp || isOtpCoolingDown,
             onRememberMeChange = signupViewModel::onRememberMeChange,
             onGetCodeClick = {
                 keyboardController?.hide()
