@@ -389,14 +389,13 @@ fun AdminSignupScreen(
                 }
             },
         )
-        ResendTimerSection(
-            timer = uiState.resendTimerSeconds,
-            canResend = uiState.canResendOtp,
-            onResendClick = {
-                showOtpErrorMessage = false          // ← ADD THIS LINE
-                signupViewModel.resendOtp()
-            }
-        )
+        if (showOtpMessage) {
+            ResendTimerSection(
+                timer = uiState.resendTimerSeconds,
+                canResend = uiState.canResendOtp,
+                onResendClick = { signupViewModel.resendOtp() }
+            )
+        }
         // Collect uiState in composable
         val uiState by signupViewModel.uiState.collectAsState()
 

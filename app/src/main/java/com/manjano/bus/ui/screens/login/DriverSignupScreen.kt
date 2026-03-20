@@ -449,11 +449,13 @@ fun DriverSignupScreen(
             )
         }
 
-        ResendTimerSection(
-            timer = uiState.resendTimerSeconds,
-            canResend = uiState.canResendOtp,
-            onResendClick = { signupViewModel.resendOtp() }
-        )
+        if (showOtpMessage) {
+            ResendTimerSection(
+                timer = uiState.resendTimerSeconds,
+                canResend = uiState.canResendOtp,
+                onResendClick = { signupViewModel.resendOtp() }
+            )
+        }
         if (showOtpMessage && !isBlocked) {
             Text(
                 text = "Check SMS for 4-digit code.",

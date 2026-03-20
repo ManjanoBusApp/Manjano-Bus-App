@@ -59,7 +59,7 @@ fun AdminSignInScreen(
     var showValidationError by rememberSaveable { mutableStateOf(false) }
     var showPhoneError by rememberSaveable { mutableStateOf(false) }
     var showUnauthorizedError by remember { mutableStateOf(false) }
-
+    var hasRequestedOtp by rememberSaveable { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val signUpUiState by signUpViewModel.uiState.collectAsStateWithLifecycle()
@@ -211,6 +211,7 @@ fun AdminSignInScreen(
                                 // Number authorized
                                 showUnauthorizedError = false
                                 viewModel.requestOtp()
+                                hasRequestedOtp = true
 
                                 scope.launch {
                                     delay(300)
@@ -229,12 +230,14 @@ fun AdminSignInScreen(
                 scope = scope
             )
             Spacer(modifier = Modifier.height(8.dp))
+            if (hasRequestedOtp && (uiState.resendTimerSeconds > 0 || uiState.canResendOtp)) {
+                ResendTimerSection(
+                    timer = uiState.resendTimerSeconds,
+                    canResend = uiState.canResendOtp,
+                    onResendClick = viewModel::resendOtp
+                )
+            }
 
-            ResendTimerSection(
-                timer = uiState.resendTimerSeconds,
-                canResend = uiState.canResendOtp,
-                onResendClick = viewModel::resendOtp
-            )
 
             AnimatedVisibility(visible = uiState.showSmsMessage) {
 

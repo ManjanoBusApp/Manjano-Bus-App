@@ -816,11 +816,13 @@ fun SignupScreen(
                 }
             },
         )
-        ResendTimerSection(
-            timer = uiState.resendTimerSeconds,
-            canResend = uiState.canResendOtp,
-            onResendClick = { signupViewModel.resendOtp() }
-        )
+        if (showOtpMessage) {
+            ResendTimerSection(
+                timer = uiState.resendTimerSeconds,
+                canResend = uiState.canResendOtp,
+                onResendClick = { signupViewModel.resendOtp() }
+            )
+        }
         if (showOtpMessage) { // → New: Show message only after Send Code
             Text(
                 text = "Check SMS for 4-digit code.",

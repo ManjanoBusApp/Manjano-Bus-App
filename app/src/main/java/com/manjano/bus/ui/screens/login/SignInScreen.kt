@@ -379,11 +379,13 @@ fun SignInScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            ResendTimerSection(
-                timer = uiState.resendTimerSeconds,
-                canResend = uiState.canResendOtp,
-                onResendClick = viewModel::resendOtp
-            )
+            if (uiState.showSmsMessage) {
+                ResendTimerSection(
+                    timer = uiState.resendTimerSeconds,
+                    canResend = uiState.canResendOtp,
+                    onResendClick = viewModel::resendOtp
+                )
+            }
 
             AnimatedVisibility(visible = uiState.showSmsMessage) {
                 Text(
