@@ -520,11 +520,30 @@ fun SignupScreen(
 // --- Send Email Button (single) ---
         Button(
             onClick = {
-                verificationSent = true
-                hasClickedSendEmail = true
-                showRedMessage = true
-                canResendEmail = false
-                emailTimer = 30
+                // --- Validate Parent ---
+                parentError = parentName.text.isBlank()
+
+                // --- Validate Children ---
+                hasTouchedChild = List(childrenNames.size) { true }
+                childErrors = childrenNames.map { it.text.isBlank() }
+                val hasEmptyChild = childErrors.any { it }
+
+                // --- Validate Email ---
+                hasTouchedEmail = true
+                emailError = email.text.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.text).matches()
+
+                val isFormValid = !parentError && !hasEmptyChild && !emailError
+
+                if (isFormValid) {
+                    verificationSent = true
+                    hasClickedSendEmail = true
+                    showRedMessage = true
+                    canResendEmail = false
+                    emailTimer = 30
+                } else {
+                    hasClickedSendEmail = false
+                    showRedMessage = false
+                }
             },
             enabled = emailTimer == 0,
             modifier = Modifier
