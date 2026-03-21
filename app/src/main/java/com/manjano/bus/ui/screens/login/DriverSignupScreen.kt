@@ -387,6 +387,7 @@ fun DriverSignupScreen(
         ActionRow(
             rememberMe = uiState.rememberMe,
             isSendingOtp = uiState.isSendingOtp,
+            timer = uiState.resendTimerSeconds,
             onRememberMeChange = signupViewModel::onRememberMeChange,
             onGetCodeClick = {
                 // Hide keyboard
