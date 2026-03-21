@@ -314,6 +314,7 @@ fun SignInScreen(
             ActionRow(
                 rememberMe = uiState.rememberMe,
                 isSendingOtp = uiState.isSendingOtp,
+                timer = uiState.resendTimerSeconds,
                 onRememberMeChange = viewModel::onRememberMeChange,
                 onGetCodeClick = {
                     val isFormatValid = PhoneNumberUtils.isValidNumber(
@@ -849,6 +850,7 @@ fun PhoneInputSection(
 fun ActionRow(
     rememberMe: Boolean,
     isSendingOtp: Boolean,
+    timer: Int = 0,
     onRememberMeChange: (Boolean) -> Unit,
     onGetCodeClick: () -> Unit,
     scope: CoroutineScope = rememberCoroutineScope(),
@@ -886,6 +888,8 @@ fun ActionRow(
         val shakeOffset = remember { mutableFloatStateOf(0f) }
         val haptic = LocalHapticFeedback.current
 
+        val isDisabled = isSendingOtp || timer > 0
+
         Button(
             onClick = {
                 haptic.performHapticFeedback(HapticFeedbackType.LongPress)
@@ -900,18 +904,20 @@ fun ActionRow(
                 }
                 onGetCodeClick()
             },
-
-            enabled = !isSendingOtp,
-            colors = ButtonDefaults.buttonColors(containerColor = Color.Black),
+            enabled = !isDisabled,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (isDisabled) Color.LightGray else Color.Black
+            ),
             modifier = Modifier.offset(x = shakeOffset.floatValue.dp)
         ) {
             Text(
-                text = if (isSendingOtp) "Sending..." else "Send Code",
+                text = if (isDisabled) "Sending..." else "Send Code",
                 color = Color.White
             )
         }
     }
 }
+
 
 // ---------------- ResendTimerSection ----------------
 @Composable
