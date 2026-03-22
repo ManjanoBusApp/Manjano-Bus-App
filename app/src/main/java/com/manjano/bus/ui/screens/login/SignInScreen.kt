@@ -911,7 +911,7 @@ fun ActionRow(
             modifier = Modifier.offset(x = shakeOffset.floatValue.dp)
         ) {
             Text(
-                text = if (isDisabled) "Sending..." else "Send Code",
+                text = if (isSendingOtp || timer > 0) "Sending..." else "Send Code",
                 color = Color.White
             )
         }

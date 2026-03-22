@@ -382,13 +382,25 @@ fun DriverSignupScreen(
             }
         }
 
+        var isButtonInProgress by remember { mutableStateOf(false) }
 
+        LaunchedEffect(uiState.resendTimerSeconds) {
+            if (uiState.resendTimerSeconds <= 0 && isButtonInProgress) {
+                isButtonInProgress = false
+            }
+        }
         // ---------------------------- SEND CODE VALIDATION ----------------------------
         ActionRow(
             rememberMe = uiState.rememberMe,
-            isSendingOtp = uiState.isSendingOtp,
+            isSendingOtp = isButtonInProgress,           // ← changed
+            timer = uiState.resendTimerSeconds,
             onRememberMeChange = signupViewModel::onRememberMeChange,
             onGetCodeClick = {
+                if (isButtonInProgress) return@ActionRow   // prevent double clicks
+
+                // ── IMMEDIATELY show sending state ────────────────
+                isButtonInProgress = true
+
                 // Hide keyboard
                 keyboardController?.hide()
 
@@ -403,7 +415,6 @@ fun DriverSignupScreen(
                 idError = idNumber.text.isBlank()
                 schoolError = schoolName.text.isBlank()
 
-                // Validate phone
                 val isValidPhone = try {
                     PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
                 } catch (e: Exception) {
@@ -411,34 +422,30 @@ fun DriverSignupScreen(
                 }
                 phoneErrorInvalid = !isValidPhone
 
-                // If driver is already registered, skip OTP check
-                if (alreadyRegistered.isNullOrBlank() && isValidPhone) {
-                    signupViewModel.checkDriverPhoneNumberInFirestore(
-                        phoneNumber,
-                        selectedCountry.isoCode
-                    )
+                if (!isValidPhone ||
+                    !alreadyRegistered.isNullOrBlank() ||
+                    phoneErrorNotRegistered
+                ) {
+                    isButtonInProgress = false
+                    return@ActionRow
                 }
 
-                // Only show OTP message if driver not already registered
-                showOtpMessage =
-                    isValidPhone && phoneAllowed == true && alreadyRegistered.isNullOrBlank()
+                // Only reach here if we intend to actually send OTP
+                showOtpMessage = phoneAllowed == true && alreadyRegistered.isNullOrBlank()
 
-                // Focus handling
-                // Focus handling
-                when {
-                    driverError -> driverFocusRequester.requestFocus()
-                    idError -> idFocusRequester.requestFocus()
-                    schoolError -> schoolFocusRequester.requestFocus()
-                    phoneErrorInvalid || phoneErrorNotRegistered || !alreadyRegistered.isNullOrBlank() -> phoneFocusRequester.requestFocus()
-                    alreadyRegistered.isNullOrBlank() -> otpFocusRequester.requestFocus()
+                // Focus OTP field if conditions are good
+                if (alreadyRegistered.isNullOrBlank()) {
+                    otpFocusRequester.requestFocus()
                 }
 
-// Disable sending OTP if driver is already registered
-                if (!alreadyRegistered.isNullOrBlank()) {
-                    showOtpMessage = false
-                }
-            }
+
+                signupViewModel.requestOtp()
+
+                // IMPORTANT: we do NOT set isButtonInProgress = false here!
+                // It will be cleared by LaunchedEffect when timer ends
+            }   //  ←←←←←←←← ADD THIS LINE (closes the onGetCodeClick lambda)
         )
+
         SnackbarHost(
             hostState = snackbarHostState
         ) { data ->
