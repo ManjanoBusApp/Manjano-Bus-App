@@ -57,6 +57,7 @@ android {
 }
 
 dependencies {
+    // Core
     implementation(libs.core.ktx)
     implementation(libs.lifecycle.runtime.ktx)
     implementation(libs.activity.compose)
@@ -68,9 +69,13 @@ dependencies {
     implementation(libs.material3)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.navigation.compose)
+
+    // Hilt
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.navigation.compose)
+
+    // Firebase
     implementation(libs.play.services.auth)
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.analytics)
@@ -78,33 +83,47 @@ dependencies {
     implementation(libs.firebase.firestore)
     implementation(libs.firebase.crashlytics)
     implementation("com.google.firebase:firebase-database-ktx")
+    implementation("com.google.firebase:firebase-storage-ktx:20.3.0")
+    implementation("com.google.firebase:firebase-functions-ktx:20.3.1")
+
+    // Data / Utilities
     implementation("androidx.datastore:datastore-preferences:1.1.0")
     implementation("com.googlecode.libphonenumber:libphonenumber:9.0.21")
+
+    // Debug / Testing
     debugImplementation(libs.ui.tooling)
     debugImplementation(libs.ui.test.manifest)
     androidTestImplementation(libs.ui.test.junit4)
-    implementation(libs.material)
-    implementation(libs.firebase.storage)
-    implementation("com.airbnb.android:lottie-compose:6.4.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation(libs.kotlinx.coroutines.core)
-    implementation(libs.kotlinx.coroutines.android)
     testImplementation("junit:junit:4.13.2")
-    implementation("com.google.firebase:firebase-storage-ktx:20.3.0")
-    implementation("com.github.bumptech.glide:glide:4.16.0")
-    implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // UI / Compose
+    implementation(libs.material)
+    implementation("com.airbnb.android:lottie-compose:6.4.0")
+    implementation("androidx.compose.material3:material3:1.1.0")
+    implementation("androidx.compose.material:material-icons-extended:1.5.0")
+    implementation("com.google.accompanist:accompanist-permissions:0.34.0")
+
+    // Maps
     implementation("com.google.android.gms:play-services-maps:18.2.0")
     implementation("com.google.maps.android:maps-compose:4.4.1")
     implementation(libs.play.services.location)
-    implementation("com.google.accompanist:accompanist-permissions:0.34.0")
+
+    // Image loading
+    implementation("com.github.bumptech.glide:glide:4.16.0")
+    implementation("io.coil-kt:coil-compose:2.7.0")
+
+    // Networking
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.moshi:moshi:1.15.1")
+    implementation("com.squareup.moshi:moshi-kotlin:1.15.1")
+
+    // Biometric auth
     implementation(libs.androidx.biometric)
-    implementation("androidx.compose.material3:material3:1.1.0")
-    implementation("androidx.compose.material:material-icons-extended:1.5.0")
+
+    // Kotlin Coroutines (PLAY SERVICES MUST MATCH CORE/ANDROID VERSION)
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
 }
-
-
-
-
-

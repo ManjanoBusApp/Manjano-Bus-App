@@ -85,6 +85,111 @@ import java.nio.charset.StandardCharsets
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
+import com.squareup.moshi.Json
+import com.squareup.moshi.JsonClass
+import com.squareup.moshi.Moshi
+import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.io.IOException
+import kotlinx.coroutines.runBlocking
+import androidx.compose.ui.draw.alpha
+import com.google.firebase.functions.FirebaseFunctions
+import kotlinx.coroutines.tasks.await
+
+
+
+data class MailboxLayerResult(
+    val isValidSyntax: Boolean,
+    val isDeliverable: Boolean,
+    val error: String? = null
+)
+
+private val okHttpClient = OkHttpClient()
+private val moshi = Moshi.Builder()
+    .add(KotlinJsonAdapterFactory())
+    .build()
+
+@JsonClass(generateAdapter = true)
+data class MailboxLayerResponse(
+    @Json(name = "format_valid") val formatValid: Boolean,
+    @Json(name = "smtp_check") val smtpCheck: Boolean,
+    val success: Boolean? = null,
+    val error: MailboxLayerError? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class MailboxLayerError(
+    val code: Int?,
+    val info: String?
+)
+
+suspend fun verifyEmailWithMailboxLayer(email: String): MailboxLayerResult = withContext(Dispatchers.IO) {
+    val encodedEmail = URLEncoder.encode(email.trim(), "UTF-8")
+    val url = "https://apilayer.net/api/check?access_key=565d95ee183d52173e20a4b8cfc5dadb&email=$encodedEmail&smtp=1&format=1"
+    val request = Request.Builder()
+        .url(url)
+        .get()
+        .build()
+
+    try {
+        val response = okHttpClient.newCall(request).execute()
+        if (!response.isSuccessful) {
+            return@withContext MailboxLayerResult(
+                isValidSyntax = false,
+                isDeliverable = false,
+                error = "API error: ${response.code}"
+            )
+        }
+
+        val body = response.body?.string() ?: return@withContext MailboxLayerResult(
+            isValidSyntax = false,
+            isDeliverable = false,
+            error = "Empty response"
+        )
+
+        val jsonAdapter = moshi.adapter(MailboxLayerResponse::class.java)
+        val apiResponse = jsonAdapter.fromJson(body)
+
+        if (apiResponse == null) {
+            return@withContext MailboxLayerResult(
+                isValidSyntax = false,
+                isDeliverable = false,
+                error = "Invalid response format"
+            )
+        }
+
+        if (apiResponse.success == false) {
+            val errorMsg = apiResponse.error?.info ?: "API returned failure"
+            return@withContext MailboxLayerResult(
+                isValidSyntax = false,
+                isDeliverable = false,
+                error = errorMsg
+            )
+        }
+
+        return@withContext MailboxLayerResult(
+            isValidSyntax = apiResponse.formatValid,
+            isDeliverable = apiResponse.smtpCheck,
+            error = null
+        )
+
+    } catch (e: IOException) {
+        return@withContext MailboxLayerResult(
+            isValidSyntax = false,
+            isDeliverable = false,
+            error = "Network error: ${e.message ?: "Unknown"}"
+        )
+    } catch (e: Exception) {
+        return@withContext MailboxLayerResult(
+            isValidSyntax = false,
+            isDeliverable = false,
+            error = "Unexpected error"
+        )
+    }
+}
 
 @Composable
 fun SignupOtpInputRow(
@@ -149,7 +254,6 @@ fun SignupOtpInputRow(
                                 }
                             }
                         },
-
                         singleLine = true,
                         textStyle = TextStyle(fontSize = 20.sp, textAlign = TextAlign.Center),
                         modifier = Modifier
@@ -161,6 +265,7 @@ fun SignupOtpInputRow(
                         ),
                         isError = otpErrorMessage != null
                     )
+
                 }
             }
         }
@@ -222,13 +327,14 @@ fun SignupScreen(
     var isSendingVerification by remember { mutableStateOf(false) }
     var verificationSent by remember { mutableStateOf(false) }
     var emailCooldown by remember { mutableStateOf(false) }
-
-    // --- Email + Resend Section (Fixed) ---
+    var mailboxError by remember { mutableStateOf<String?>(null) }
     var emailTimer by remember { mutableStateOf(0) }
     var showRedMessage by remember { mutableStateOf(false) }
     var canResendEmail by remember { mutableStateOf(false) }
-    var hasClickedSendEmail by remember { mutableStateOf(false) } // Track first click
+    var hasClickedSendEmail by remember { mutableStateOf(false) }
+    var emailVerified by remember { mutableStateOf(false) }
     val emailShakeOffset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
+    val functions = remember { FirebaseFunctions.getInstance("us-central1") }
 
     LaunchedEffect(Unit) {
         parentFocusRequester.requestFocus()
@@ -468,6 +574,7 @@ fun SignupScreen(
                 canResendEmail = false
                 emailTimer = 0
                 showRedMessage = false
+                mailboxError = null
             },
             placeholder = { Text("name@email.com") },
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
@@ -491,12 +598,17 @@ fun SignupScreen(
             enabled = true
         )
 
-        if (emailError) Text(
-            "Please enter a valid email address",
-            color = Color.Red,
-            fontSize = 12.sp
-        )
+        // Only show one error at a time
+        val emailErrorMessage = mailboxError
+            ?: if (emailError) "Please enter a valid, working email address" else null
 
+        if (emailErrorMessage != null) {
+            Text(
+                text = emailErrorMessage,
+                color = Color.Red,
+                fontSize = 12.sp
+            )
+        }
 
         if (hasClickedSendEmail && showRedMessage) {
             Text(
@@ -513,37 +625,81 @@ fun SignupScreen(
 // --- Send Email Button (single) ---
         Button(
             onClick = {
-                // --- Validate Parent ---
                 parentError = parentName.text.isBlank()
-
-                // --- Validate Children ---
                 hasTouchedChild = List(childrenNames.size) { true }
                 childErrors = childrenNames.map { it.text.isBlank() }
                 val hasEmptyChild = childErrors.any { it }
 
-                // --- Validate Email ---
                 hasTouchedEmail = true
                 emailError = email.text.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.text).matches()
+
+                Log.d("EMAIL_DEBUG", "Email text: '${email.text}'")
+                Log.d("EMAIL_DEBUG", "Is blank: ${email.text.isBlank()}")
+                Log.d("EMAIL_DEBUG", "Matches pattern: ${Patterns.EMAIL_ADDRESS.matcher(email.text).matches()}")
+                Log.d("EMAIL_DEBUG", "emailError: $emailError")
 
                 val isFormValid = !parentError && !hasEmptyChild && !emailError
 
                 if (isFormValid) {
-                    verificationSent = true
-                    hasClickedSendEmail = true
-                    showRedMessage = true
-                    canResendEmail = false
-                    emailTimer = 30
+                    mailboxError = null
+                    scope.launch {
+                        Log.d("EMAIL_FUNCTION", "🚀 About to call Firebase function")
+
+                        try {
+                            // ✅ MailboxLayer verification (friendly messages only)
+                            val mailboxResult = verifyEmailWithMailboxLayer(email.text.trim())
+                            if (!mailboxResult.isDeliverable) {
+                                mailboxError = "Please enter a valid, working email address."
+                                emailError = false // ✅ FIX: prevent double error
+                                emailFocusRequester.requestFocus()
+                                return@launch
+                            }
+
+                            // ✅ Send Firebase verification email
+                            val emailTrimmed = email.text.trim()
+                            val safeEmail = if (emailTrimmed.isNotEmpty()) emailTrimmed else "reneegithinji@yahoo.com"
+
+// ✅ Only one data map
+                            val data = hashMapOf(
+                                "email" to safeEmail
+                            )
+
+                            try {
+                                Log.d("EMAIL_FUNCTION", "➡️ Data being sent to Firebase: $data")
+
+                                val result = functions.getHttpsCallable("sendVerificationEmail").call(data).await()
+                                Log.d("EMAIL_FUNCTION", "✅ Function call SUCCESS, result: $result")
+                            } catch (e: Exception) {
+                                Log.e("EMAIL_FUNCTION", "❌ Error sending verification email", e)
+                            }
+                            // ✅ Update UI states on success
+                            verificationSent = true
+                            hasClickedSendEmail = true
+                            showRedMessage = true
+                            canResendEmail = false
+                            emailTimer = 30
+                            mailboxError = null
+
+                        } catch (e: Exception) {
+                            Log.e("EMAIL_FUNCTION", "Error sending verification email", e)
+                            // Always show a friendly message, never raw network errors
+                            mailboxError = "Unable to send email. Please try again later."
+                            verificationSent = false
+                            hasClickedSendEmail = false
+                            showRedMessage = false
+                        }
+                    }
                 } else {
                     hasClickedSendEmail = false
                     showRedMessage = false
+                    mailboxError = null
                 }
             },
             enabled = emailTimer == 0,
             modifier = Modifier
                 .height(44.dp)
                 .width(150.dp)
-                .align(Alignment.End)
-                .offset(x = emailShakeOffset.floatValue.dp),
+                .align(Alignment.End),
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (emailTimer == 0) Color.Black else Color.LightGray,
                 contentColor = Color.White,
@@ -643,8 +799,9 @@ fun SignupScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .alpha(if (emailVerified) 1f else 0.5f)  // grey out when not verified
                 .onFocusChanged { focusState ->
-                    if (focusState.isFocused) {
+                    if (focusState.isFocused && emailVerified) {  // only allow focus if verified
                         phoneErrorText = ""
                         phoneError = false
                         phoneErrorInvalid = false
@@ -655,13 +812,15 @@ fun SignupScreen(
             PhoneInputSection(
                 selectedCountry = selectedCountry,
                 phoneNumber = phoneNumber,
-                onCountrySelected = { selectedCountry = it },
+                onCountrySelected = { if (emailVerified) selectedCountry = it },  // block change if not verified
                 onPhoneNumberChange = { newNumber ->
-                    phoneNumber = newNumber
-                    phoneErrorText = ""
-                    phoneError = false
-                    phoneErrorInvalid = false
-                    hasTouchedPhone = true
+                    if (emailVerified) {
+                        phoneNumber = newNumber
+                        phoneErrorText = ""
+                        phoneError = false
+                        phoneErrorInvalid = false
+                        hasTouchedPhone = true
+                    }
                 },
                 showError = phoneError || phoneErrorInvalid || phoneErrorText.isNotEmpty(),
                 onShowErrorChange = { /* ignore */ },
@@ -725,91 +884,93 @@ fun SignupScreen(
         }
         ActionRow(
             rememberMe = uiState.rememberMe,
-            isSendingOtp = uiState.isSendingOtp || isOtpCoolingDown,
-            onRememberMeChange = signupViewModel::onRememberMeChange,
+            isSendingOtp = uiState.isSendingOtp || isOtpCoolingDown || !emailVerified,
+            onRememberMeChange = { if (emailVerified) signupViewModel.onRememberMeChange(it) },
             onGetCodeClick = {
-                keyboardController?.hide()
+                if (emailVerified) {
+                    keyboardController?.hide()
 
-                scope.launch {
-                    // --- Step 1: Reset previous OTP error message ---
-                    showOtpErrorMessage = false
+                    scope.launch {
+                        // --- Step 1: Reset previous OTP error message ---
+                        showOtpErrorMessage = false
 
-                    // --- Step 2: Ensure Firestore phone check is done ---
-                    if (phoneNumber.isNotBlank() && isPhoneAllowed == null) {
-                        signupViewModel.checkPhoneNumberInFirestore(
-                            phone = phoneNumber,
-                            countryIso = selectedCountry.isoCode
-                        )
-                        // Small delay to allow result
-                        delay(500)
-                    }
-
-                    // --- Step 3: Validate all fields ---
-                    parentError = parentName.text.isEmpty()
-
-                    hasTouchedChild = List(childrenNames.size) { true }
-                    childErrors =
-                        childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
-                    val hasEmptyChild = childErrors.any { it }
-                    studentError = hasEmptyChild
-
-                    hasTouchedEmail = true
-                    emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
-                        .matches()
-
-                    // --- Step 4: Reset phone error UI + mark as touched ---
-                    phoneError = false
-                    phoneErrorText = ""
-                    hasTouchedPhone = true
-
-                    // Local format validation first
-                    val isValidFormat = try {
-                        PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
-                    } catch (e: Exception) {
-                        false
-                    }
-
-                    phoneErrorInvalid = !isValidFormat && phoneNumber.isNotBlank()
-
-                    // Then Firestore / school allowance check
-                    val phoneNotAllowed = isPhoneAllowed != true
-                    if (phoneNotAllowed && isValidFormat) {
-                        phoneErrorText = "Can't proceed, contact the school"
-                        phoneError = true
-                    } else if (!isValidFormat) {
-                        phoneErrorText = ""   // let the invalid message show via phoneErrorInvalid
-                    }
-                    // --- Step 6: Overall validity check ---
-                    val canProceed =
-                        !parentError && !hasEmptyChild && !emailError && !phoneNotAllowed
-
-                    if (canProceed) {
-                        // --- Step 7: Request OTP (only once) ---
-                        signupViewModel.requestOtp()
-                        showOtpMessage = true
-
-                        if (alreadyRegisteredError != null) {
-                            phoneFocusRequester.requestFocus()
-                            return@launch
+                        // --- Step 2: Ensure Firestore phone check is done ---
+                        if (phoneNumber.isNotBlank() && isPhoneAllowed == null) {
+                            signupViewModel.checkPhoneNumberInFirestore(
+                                phone = phoneNumber,
+                                countryIso = selectedCountry.isoCode
+                            )
+                            // Small delay to allow result
+                            delay(500)
                         }
-                        delay(100)
-                        if (scrollState.maxValue > 0) {
-                            otpFocusRequester.requestFocus()
-                            scrollState.animateScrollTo(scrollState.maxValue)
+
+                        // --- Step 3: Validate all fields ---
+                        parentError = parentName.text.isEmpty()
+
+                        hasTouchedChild = List(childrenNames.size) { true }
+                        childErrors =
+                            childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
+                        val hasEmptyChild = childErrors.any { it }
+                        studentError = hasEmptyChild
+
+                        hasTouchedEmail = true
+                        emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
+                            .matches()
+
+                        // --- Step 4: Reset phone error UI + mark as touched ---
+                        phoneError = false
+                        phoneErrorText = ""
+                        hasTouchedPhone = true
+
+                        // Local format validation first
+                        val isValidFormat = try {
+                            PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                        } catch (e: Exception) {
+                            false
                         }
-                    } else {
-                        // --- Step 8: Focus first invalid field ---
-                        when {
-                            parentError -> parentFocusRequester.requestFocus()
-                            hasEmptyChild -> {
-                                val firstEmpty = childErrors.indexOfFirst { it }
-                                if (firstEmpty >= 0) studentFocusRequester.requestFocus()
+
+                        phoneErrorInvalid = !isValidFormat && phoneNumber.isNotBlank()
+
+                        // Then Firestore / school allowance check
+                        val phoneNotAllowed = isPhoneAllowed != true
+                        if (phoneNotAllowed && isValidFormat) {
+                            phoneErrorText = "Can't proceed, contact the school"
+                            phoneError = true
+                        } else if (!isValidFormat) {
+                            phoneErrorText = ""   // let the invalid message show via phoneErrorInvalid
+                        }
+                        // --- Step 6: Overall validity check ---
+                        val canProceed =
+                            !parentError && !hasEmptyChild && !emailError && !phoneNotAllowed
+
+                        if (canProceed) {
+                            // --- Step 7: Request OTP (only once) ---
+                            signupViewModel.requestOtp()
+                            showOtpMessage = true
+
+                            if (alreadyRegisteredError != null) {
+                                phoneFocusRequester.requestFocus()
+                                return@launch
                             }
-                            emailError -> emailFocusRequester.requestFocus()
-                            phoneNotAllowed -> phoneFocusRequester.requestFocus()
+                            delay(100)
+                            if (scrollState.maxValue > 0) {
+                                otpFocusRequester.requestFocus()
+                                scrollState.animateScrollTo(scrollState.maxValue)
+                            }
+                        } else {
+                            // --- Step 8: Focus first invalid field ---
+                            when {
+                                parentError -> parentFocusRequester.requestFocus()
+                                hasEmptyChild -> {
+                                    val firstEmpty = childErrors.indexOfFirst { it }
+                                    if (firstEmpty >= 0) studentFocusRequester.requestFocus()
+                                }
+                                emailError -> emailFocusRequester.requestFocus()
+                                phoneNotAllowed -> phoneFocusRequester.requestFocus()
+                            }
                         }
                     }
-                }
+                } // ← this closing brace was missing in your version
             },
         )
         if (showOtpMessage) {
