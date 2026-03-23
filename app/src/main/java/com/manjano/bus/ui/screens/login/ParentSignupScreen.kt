@@ -666,6 +666,17 @@ fun SignupScreen(
 // --- Send Email Button (single) ---
         Button(
             onClick = {
+                // Shake animation when tapped
+                scope.launch {
+                    repeat(2) {
+                        emailShakeOffset.floatValue = 4f
+                        delay(40)
+                        emailShakeOffset.floatValue = -4f
+                        delay(40)
+                    }
+                    emailShakeOffset.floatValue = 0f
+                }
+
                 parentError = parentName.text.isBlank()
                 hasTouchedChild = List(childrenNames.size) { true }
                 childErrors = childrenNames.map { it.text.isBlank() }
@@ -708,7 +719,7 @@ fun SignupScreen(
                             // ✅ MailboxLayer verification (friendly messages only)
                             val mailboxResult = verifyEmailWithMailboxLayer(email.text.trim())
 
-// Quick typo catch for very common mistakes
+                            // Quick typo catch for very common mistakes
                             val emailLower = email.text.trim().lowercase()
                             val commonTypos = listOf(
                                 "gmai.com" to "gmail.com",
@@ -754,7 +765,7 @@ fun SignupScreen(
                             val safeEmail =
                                 if (emailTrimmed.isNotEmpty()) emailTrimmed else "reneegithinji@yahoo.com"
 
-// ✅ Only one data map
+                            // ✅ Only one data map
                             val data = hashMapOf(
                                 "email" to safeEmail
                             )
@@ -796,7 +807,8 @@ fun SignupScreen(
             modifier = Modifier
                 .height(44.dp)
                 .width(150.dp)
-                .align(Alignment.End),
+                .align(Alignment.End)
+                .offset(x = emailShakeOffset.floatValue.dp),  // ← shake applied here
             colors = ButtonDefaults.buttonColors(
                 containerColor = if (emailTimer == 0) Color.Black else Color.LightGray,
                 contentColor = Color.White,
