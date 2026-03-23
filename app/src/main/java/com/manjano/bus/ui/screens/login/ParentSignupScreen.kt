@@ -707,9 +707,44 @@ fun SignupScreen(
                         try {
                             // ✅ MailboxLayer verification (friendly messages only)
                             val mailboxResult = verifyEmailWithMailboxLayer(email.text.trim())
+
+// Quick typo catch for very common mistakes
+                            val emailLower = email.text.trim().lowercase()
+                            val commonTypos = listOf(
+                                "gmai.com" to "gmail.com",
+                                "gmial.com" to "gmail.com",
+                                "gmal.com" to "gmail.com",
+                                "gmil.com" to "gmail.com",
+                                "gemail.com" to "gmail.com",
+                                "yaho.com" to "yahoo.com",
+                                "yahhoo.com" to "yahoo.com",
+                                "yahooo.com" to "yahoo.com",
+                                "hotmai.com" to "hotmail.com",
+                                "hotmal.com" to "hotmail.com",
+                                "outlok.com" to "outlook.com"
+                            )
+
+                            var fixedEmail = emailLower
+                            var typoDetected = false
+
+                            for ((wrong, correct) in commonTypos) {
+                                if (fixedEmail.contains("@$wrong")) {
+                                    fixedEmail = fixedEmail.replace("@$wrong", "@$correct")
+                                    typoDetected = true
+                                    break
+                                }
+                            }
+
+                            if (typoDetected) {
+                                mailboxError = "Did you mean $fixedEmail? Please correct the typo."
+                                emailError = true
+                                emailFocusRequester.requestFocus()
+                                return@launch
+                            }
+
                             if (!mailboxResult.isDeliverable) {
                                 mailboxError = "Please enter a valid, working email address."
-                                emailError = false // ✅ FIX: prevent double error
+                                emailError = false // keep this as-is
                                 emailFocusRequester.requestFocus()
                                 return@launch
                             }
@@ -992,7 +1027,7 @@ fun SignupScreen(
         ) {
             ActionRow(
                 rememberMe = uiState.rememberMe,
-                isSendingOtp = uiState.isSendingOtp || isOtpCoolingDown || !emailVerified,
+                isSendingOtp = uiState.isSendingOtp || isOtpCoolingDown,
                 onRememberMeChange = { if (emailVerified) signupViewModel.onRememberMeChange(it) },
                 onGetCodeClick = {
                     if (emailVerified) {
