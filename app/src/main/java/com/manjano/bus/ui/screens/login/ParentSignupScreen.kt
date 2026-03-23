@@ -100,6 +100,10 @@ import com.google.firebase.functions.FirebaseFunctions
 import kotlinx.coroutines.tasks.await
 import com.manjano.bus.MainActivity
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.clickable
+
 
 data class MailboxLayerResult(
     val isValidSyntax: Boolean,
@@ -202,7 +206,8 @@ fun SignupOtpInputRow(
     onClearError: () -> Unit,
     onAutoVerify: () -> Unit,
     isSending: Boolean = false,
-    focusRequester: FocusRequester
+    focusRequester: FocusRequester,
+    emailVerified: Boolean
 ) {
     val safeOtp =
         if (otp.size == Constants.OTP_LENGTH) otp else List(Constants.OTP_LENGTH) { "" }
@@ -237,7 +242,8 @@ fun SignupOtpInputRow(
                     OutlinedTextField(
                         value = digit,
                         onValueChange = { newValue ->
-                            if (newValue.length <= 1 && newValue.all { ch -> ch.isDigit() }) {
+                            // Only allow change if verified
+                            if (emailVerified && newValue.length <= 1 && newValue.all { ch -> ch.isDigit() }) {
                                 val newOtp = safeOtp.toMutableList()
                                 newOtp[index] = newValue
                                 onOtpChange(newOtp)
@@ -263,9 +269,9 @@ fun SignupOtpInputRow(
                             keyboardType = KeyboardType.Number,
                             imeAction = if (index == Constants.OTP_LENGTH - 1) ImeAction.Done else ImeAction.Next
                         ),
-                        isError = otpErrorMessage != null
+                        isError = otpErrorMessage != null,
+                        enabled = emailVerified     // ← this line prevents focus + cursor
                     )
-
                 }
             }
         }
@@ -887,22 +893,20 @@ fun SignupScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .alpha(if (emailVerified) 1f else 0.5f)  // grey out when not verified
-                .onFocusChanged { focusState ->
-                    if (focusState.isFocused && emailVerified) {  // only allow focus if verified
-                        phoneErrorText = ""
-                        phoneError = false
-                        phoneErrorInvalid = false
-                        hasTouchedPhone = true
-                    }
-                }
+                .alpha(if (emailVerified) 1f else 0.6f)
+                .focusable(enabled = emailVerified)
+                .clickable(
+                    enabled = emailVerified,
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {}
         ) {
             PhoneInputSection(
                 selectedCountry = selectedCountry,
                 phoneNumber = phoneNumber,
                 onCountrySelected = {
                     if (emailVerified) selectedCountry = it
-                },  // block change if not verified
+                },
                 onPhoneNumberChange = { newNumber ->
                     if (emailVerified) {
                         phoneNumber = newNumber
@@ -916,7 +920,8 @@ fun SignupScreen(
                 onShowErrorChange = { /* ignore */ },
                 phoneFocusRequester = phoneFocusRequester,
                 keyboardController = keyboardController,
-                focusManager = focusManager
+                focusManager = focusManager,
+                enabled = emailVerified
             )
         }
         if (hasTouchedPhone) {
@@ -972,100 +977,114 @@ fun SignupScreen(
         val isOtpCoolingDown by remember(uiState.resendTimerSeconds) {
             derivedStateOf { uiState.resendTimerSeconds > 0 }
         }
-        ActionRow(
-            rememberMe = uiState.rememberMe,
-            isSendingOtp = uiState.isSendingOtp || isOtpCoolingDown || !emailVerified,
-            onRememberMeChange = { if (emailVerified) signupViewModel.onRememberMeChange(it) },
-            onGetCodeClick = {
-                if (emailVerified) {
-                    keyboardController?.hide()
 
-                    scope.launch {
-                        // --- Step 1: Reset previous OTP error message ---
-                        showOtpErrorMessage = false
 
-                        // --- Step 2: Ensure Firestore phone check is done ---
-                        if (phoneNumber.isNotBlank() && isPhoneAllowed == null) {
-                            signupViewModel.checkPhoneNumberInFirestore(
-                                phone = phoneNumber,
-                                countryIso = selectedCountry.isoCode
-                            )
-                            // Small delay to allow result
-                            delay(500)
-                        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (emailVerified) 1f else 0.6f)
+                .focusable(enabled = emailVerified)
+                .clickable(
+                    enabled = emailVerified,
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {}
+        ) {
+            ActionRow(
+                rememberMe = uiState.rememberMe,
+                isSendingOtp = uiState.isSendingOtp || isOtpCoolingDown || !emailVerified,
+                onRememberMeChange = { if (emailVerified) signupViewModel.onRememberMeChange(it) },
+                onGetCodeClick = {
+                    if (emailVerified) {
+                        keyboardController?.hide()
 
-                        // --- Step 3: Validate all fields ---
-                        parentError = parentName.text.isEmpty()
+                        scope.launch {
+                            // --- Step 1: Reset previous OTP error message ---
+                            showOtpErrorMessage = false
 
-                        hasTouchedChild = List(childrenNames.size) { true }
-                        childErrors =
-                            childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
-                        val hasEmptyChild = childErrors.any { it }
-                        studentError = hasEmptyChild
-
-                        hasTouchedEmail = true
-                        emailError =
-                            email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
-                                .matches()
-
-                        // --- Step 4: Reset phone error UI + mark as touched ---
-                        phoneError = false
-                        phoneErrorText = ""
-                        hasTouchedPhone = true
-
-                        // Local format validation first
-                        val isValidFormat = try {
-                            PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
-                        } catch (e: Exception) {
-                            false
-                        }
-
-                        phoneErrorInvalid = !isValidFormat && phoneNumber.isNotBlank()
-
-                        // Then Firestore / school allowance check
-                        val phoneNotAllowed = isPhoneAllowed != true
-                        if (phoneNotAllowed && isValidFormat) {
-                            phoneErrorText = "Can't proceed, contact the school"
-                            phoneError = true
-                        } else if (!isValidFormat) {
-                            phoneErrorText =
-                                ""   // let the invalid message show via phoneErrorInvalid
-                        }
-                        // --- Step 6: Overall validity check ---
-                        val canProceed =
-                            !parentError && !hasEmptyChild && !emailError && !phoneNotAllowed
-
-                        if (canProceed) {
-                            // --- Step 7: Request OTP (only once) ---
-                            signupViewModel.requestOtp()
-                            showOtpMessage = true
-
-                            if (alreadyRegisteredError != null) {
-                                phoneFocusRequester.requestFocus()
-                                return@launch
+                            // --- Step 2: Ensure Firestore phone check is done ---
+                            if (phoneNumber.isNotBlank() && isPhoneAllowed == null) {
+                                signupViewModel.checkPhoneNumberInFirestore(
+                                    phone = phoneNumber,
+                                    countryIso = selectedCountry.isoCode
+                                )
+                                // Small delay to allow result
+                                delay(500)
                             }
-                            delay(100)
-                            if (scrollState.maxValue > 0) {
-                                otpFocusRequester.requestFocus()
-                                scrollState.animateScrollTo(scrollState.maxValue)
+
+                            // --- Step 3: Validate all fields ---
+                            parentError = parentName.text.isEmpty()
+
+                            hasTouchedChild = List(childrenNames.size) { true }
+                            childErrors =
+                                childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
+                            val hasEmptyChild = childErrors.any { it }
+                            studentError = hasEmptyChild
+
+                            hasTouchedEmail = true
+                            emailError =
+                                email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
+                                    .matches()
+
+                            // --- Step 4: Reset phone error UI + mark as touched ---
+                            phoneError = false
+                            phoneErrorText = ""
+                            hasTouchedPhone = true
+
+                            // Local format validation first
+                            val isValidFormat = try {
+                                PhoneNumberUtils.isValidNumber(phoneNumber, selectedCountry.isoCode)
+                            } catch (e: Exception) {
+                                false
                             }
-                        } else {
-                            // --- Step 8: Focus first invalid field ---
-                            when {
-                                parentError -> parentFocusRequester.requestFocus()
-                                hasEmptyChild -> {
-                                    val firstEmpty = childErrors.indexOfFirst { it }
-                                    if (firstEmpty >= 0) studentFocusRequester.requestFocus()
+
+                            phoneErrorInvalid = !isValidFormat && phoneNumber.isNotBlank()
+
+                            // Then Firestore / school allowance check
+                            val phoneNotAllowed = isPhoneAllowed != true
+                            if (phoneNotAllowed && isValidFormat) {
+                                phoneErrorText = "Can't proceed, contact the school"
+                                phoneError = true
+                            } else if (!isValidFormat) {
+                                phoneErrorText =
+                                    ""   // let the invalid message show via phoneErrorInvalid
+                            }
+                            // --- Step 6: Overall validity check ---
+                            val canProceed =
+                                !parentError && !hasEmptyChild && !emailError && !phoneNotAllowed
+
+                            if (canProceed) {
+                                // --- Step 7: Request OTP (only once) ---
+                                signupViewModel.requestOtp()
+                                showOtpMessage = true
+
+                                if (alreadyRegisteredError != null) {
+                                    phoneFocusRequester.requestFocus()
+                                    return@launch
                                 }
+                                delay(100)
+                                if (scrollState.maxValue > 0) {
+                                    otpFocusRequester.requestFocus()
+                                    scrollState.animateScrollTo(scrollState.maxValue)
+                                }
+                            } else {
+                                // --- Step 8: Focus first invalid field ---
+                                when {
+                                    parentError -> parentFocusRequester.requestFocus()
+                                    hasEmptyChild -> {
+                                        val firstEmpty = childErrors.indexOfFirst { it }
+                                        if (firstEmpty >= 0) studentFocusRequester.requestFocus()
+                                    }
 
-                                emailError -> emailFocusRequester.requestFocus()
-                                phoneNotAllowed -> phoneFocusRequester.requestFocus()
+                                    emailError -> emailFocusRequester.requestFocus()
+                                    phoneNotAllowed -> phoneFocusRequester.requestFocus()
+                                }
                             }
                         }
                     }
-                } // ← this closing brace was missing in your version
-            },
-        )
+                }
+            )
+        }
         if (showOtpMessage) {
             ResendTimerSection(
                 timer = uiState.resendTimerSeconds,
@@ -1094,51 +1113,64 @@ fun SignupScreen(
             mutableStateListOf(*Array(Constants.OTP_LENGTH) { false })
         }
 
-        SignupOtpInputRow(
-            otp = uiState.otpDigits,
-            otpErrorMessage = if (otpBoxErrors.any { error -> error }) "Please fill all OTP digits" else null,
-            shouldShakeOtp = uiState.shouldShakeOtp,
-            onOtpChange = { digits: List<String> ->
-                showOtpMessage = false
-                digits.forEachIndexed { index, digit ->
-                    signupViewModel.onOtpDigitChange(index, digit)
-                    otpBoxErrors[index] = digit.isEmpty()
-                }
-
-                if (digits.all { it.isNotEmpty() }) {
-                    val enteredOtp = digits.joinToString("")
-                    if (enteredOtp == Constants.TEST_OTP) {
-                        keyboardController?.hide()
-                        signupViewModel.setOtpValid(true)
-                    } else {
-                        signupViewModel.setOtpValid(false)
-
-                        // ✅ Step 1: Clear OTP boxes on wrong code
-                        val clearedOtp = List(Constants.OTP_LENGTH) { "" }
-                        clearedOtp.forEachIndexed { index, _ ->
-                            signupViewModel.onOtpDigitChange(index, "")
-                            otpBoxErrors[index] = true
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .alpha(if (emailVerified) 1f else 0.6f)
+                .focusable(enabled = emailVerified)
+                .clickable(
+                    enabled = emailVerified,
+                    indication = null,
+                    interactionSource = remember { MutableInteractionSource() }
+                ) {}
+        ) {
+            SignupOtpInputRow(
+                otp = uiState.otpDigits,
+                otpErrorMessage = if (otpBoxErrors.any { error -> error }) "Please fill all OTP digits" else null,
+                shouldShakeOtp = uiState.shouldShakeOtp,
+                onOtpChange = { digits: List<String> ->
+                    if (emailVerified) {
+                        showOtpMessage = false
+                        digits.forEachIndexed { index, digit ->
+                            signupViewModel.onOtpDigitChange(index, digit)
+                            otpBoxErrors[index] = digit.isEmpty()
                         }
 
-                        // Move cursor back to first box
-                        otpFocusRequester.requestFocus()
+                        if (digits.all { it.isNotEmpty() }) {
+                            val enteredOtp = digits.joinToString("")
+                            if (enteredOtp == Constants.TEST_OTP) {
+                                keyboardController?.hide()
+                                signupViewModel.setOtpValid(true)
+                            } else {
+                                signupViewModel.setOtpValid(false)
 
-                        // Show error message
-                        showOtpErrorMessage = true
+                                val clearedOtp = List(Constants.OTP_LENGTH) { "" }
+                                clearedOtp.forEachIndexed { index, _ ->
+                                    signupViewModel.onOtpDigitChange(index, "")
+                                    otpBoxErrors[index] = true
+                                }
+
+                                otpFocusRequester.requestFocus()
+
+                                showOtpErrorMessage = true
+                            }
+                        }
                     }
-                }
-            },
-            keyboardController = keyboardController,
-            focusManager = focusManager,
-            onClearError = {
-                otpBoxErrors.fill(false)
-                showOtpErrorMessage = false
-            },
-            onAutoVerify = {},
-            isSending = uiState.isOtpSubmitting,
-            focusRequester = otpFocusRequester
-        )
-
+                },
+                keyboardController = keyboardController,
+                focusManager = focusManager,
+                onClearError = {
+                    if (emailVerified) {
+                        otpBoxErrors.fill(false)
+                        showOtpErrorMessage = false
+                    }
+                },
+                onAutoVerify = {},
+                isSending = uiState.isOtpSubmitting,
+                focusRequester = otpFocusRequester,
+                emailVerified = emailVerified   // ← ADD THIS LINE (very last argument)
+            )
+        }
         Spacer(modifier = Modifier.height(12.dp))
 
         val isOtpValid by signupViewModel.isOtpValid.collectAsState()

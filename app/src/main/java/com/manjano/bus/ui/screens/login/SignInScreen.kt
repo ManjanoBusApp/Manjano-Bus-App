@@ -582,7 +582,8 @@ fun PhoneInputSection(
     onShowErrorChange: (Boolean) -> Unit,
     phoneFocusRequester: FocusRequester,
     keyboardController: SoftwareKeyboardController?,
-    focusManager: androidx.compose.ui.focus.FocusManager
+    focusManager: androidx.compose.ui.focus.FocusManager,
+    enabled: Boolean = true
 ) {
 
     var expanded by remember { mutableStateOf(false) }
@@ -732,51 +733,48 @@ fun PhoneInputSection(
             OutlinedTextField(
                 value = localPhone,
                 onValueChange = { newValue ->
-                    val digits = newValue.text.filter { it.isDigit() }
-                    val limitedDigits = digits.take(15)
-                    val formatter = phoneUtil.getAsYouTypeFormatter(selectedCountry.isoCode)
-                    var formatted = ""
-                    limitedDigits.forEach { ch -> formatted = formatter.inputDigit(ch) }
+                    if (enabled) {  // ← prevents any change when disabled
+                        val digits = newValue.text.filter { it.isDigit() }
+                        val limitedDigits = digits.take(15)
+                        val formatter = phoneUtil.getAsYouTypeFormatter(selectedCountry.isoCode)
+                        var formatted = ""
+                        limitedDigits.forEach { ch -> formatted = formatter.inputDigit(ch) }
 
-                    // Calculate approximate new cursor position after formatting
-                    val oldSelectionStart =
-                        newValue.selection.start.coerceIn(0, newValue.text.length)
-// Count how many digits were before the old cursor
-                    var digitCountBeforeCursor = 0
-                    for (i in 0 until oldSelectionStart) {
-                        if (newValue.text[i].isDigit()) digitCountBeforeCursor++
+                        // Calculate approximate new cursor position after formatting
+                        val oldSelectionStart =
+                            newValue.selection.start.coerceIn(0, newValue.text.length)
+                        var digitCountBeforeCursor = 0
+                        for (i in 0 until oldSelectionStart) {
+                            if (newValue.text[i].isDigit()) digitCountBeforeCursor++
+                        }
+                        var newCursorPos = 0
+                        var digitsSeen = 0
+                        while (newCursorPos < formatted.length && digitsSeen < digitCountBeforeCursor) {
+                            if (formatted[newCursorPos].isDigit()) digitsSeen++
+                            newCursorPos++
+                        }
+                        if (oldSelectionStart >= newValue.text.length || digitsSeen < digitCountBeforeCursor) {
+                            newCursorPos = formatted.length
+                        }
+
+                        localPhone = TextFieldValue(
+                            text = formatted,
+                            selection = TextRange(newCursorPos.coerceIn(0, formatted.length))
+                        )
+
+                        onPhoneNumberChange(limitedDigits)
+
+                        val isNumberValid = try {
+                            val proto = phoneUtil.parse(limitedDigits, selectedCountry.isoCode)
+                            phoneUtil.isValidNumberForRegion(proto, selectedCountry.isoCode)
+                        } catch (e: Exception) {
+                            false
+                        }
+
+                        if (isNumberValid) {
+                            keyboardController?.hide()
+                        }
                     }
-// Now find the position in the new formatted string after that many digits
-                    var newCursorPos = 0
-                    var digitsSeen = 0
-                    while (newCursorPos < formatted.length && digitsSeen < digitCountBeforeCursor) {
-                        if (formatted[newCursorPos].isDigit()) digitsSeen++
-                        newCursorPos++
-                    }
-// If cursor was at end or after last digit, place at new end
-                    if (oldSelectionStart >= newValue.text.length || digitsSeen < digitCountBeforeCursor) {
-                        newCursorPos = formatted.length
-                    }
-
-                    localPhone = TextFieldValue(
-                        text = formatted,
-                        selection = TextRange(newCursorPos.coerceIn(0, formatted.length))
-                    )
-
-                    onPhoneNumberChange(limitedDigits)
-
-                    // Auto-hide keyboard when valid length/format is reached for the specific country
-                    val isNumberValid = try {
-                        val proto = phoneUtil.parse(limitedDigits, selectedCountry.isoCode)
-                        phoneUtil.isValidNumberForRegion(proto, selectedCountry.isoCode)
-                    } catch (e: Exception) {
-                        false
-                    }
-
-                    if (isNumberValid) {
-                        keyboardController?.hide()
-                    }
-
                 },
                 placeholder = {
                     Text(
@@ -819,7 +817,7 @@ fun PhoneInputSection(
                     .offset(x = (-4).dp)
                     .focusRequester(phoneFocusRequester)
                     .onFocusChanged { state: androidx.compose.ui.focus.FocusState ->
-                        isPhoneFieldFocused = state.isFocused   // ← just update the trigger state
+                        isPhoneFieldFocused = state.isFocused
 
                         if (!state.isFocused && localPhone.text.isNotEmpty()) {
                             val isValid = try {
@@ -839,7 +837,8 @@ fun PhoneInputSection(
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = if (displayError) Color.Red else appPurple,
                     unfocusedBorderColor = if (displayError) Color.Red else Color.Gray
-                )
+                ),
+                enabled = enabled
             )
         }
     }
