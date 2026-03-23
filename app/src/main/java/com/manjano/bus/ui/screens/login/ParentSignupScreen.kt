@@ -712,89 +712,105 @@ fun SignupScreen(
 
                 if (isFormValid) {
                     mailboxError = null
-                    scope.launch {
-                        Log.d("EMAIL_FUNCTION", "🚀 About to call Firebase function")
 
+                    // Quick typo catch for very common mistakes (sync, instant)
+                    val emailLower = email.text.trim().lowercase()
+                    val commonTypos = listOf(
+                        "gmai.com" to "gmail.com",
+                        "gmial.com" to "gmail.com",
+                        "gmal.com" to "gmail.com",
+                        "gmil.com" to "gmail.com",
+                        "gemail.com" to "gmail.com",
+                        "yaho.com" to "yahoo.com",
+                        "yahhoo.com" to "yahoo.com",
+                        "yahooo.com" to "yahoo.com",
+                        "hotmai.com" to "hotmail.com",
+                        "hotmal.com" to "hotmail.com",
+                        "outlok.com" to "outlook.com"
+                    )
+
+                    var fixedEmail = emailLower
+                    var typoDetected = false
+
+                    for ((wrong, correct) in commonTypos) {
+                        if (fixedEmail.contains("@$wrong")) {
+                            fixedEmail = fixedEmail.replace("@$wrong", "@$correct")
+                            typoDetected = true
+                            break
+                        }
+                    }
+
+                    if (typoDetected) {
+                        mailboxError = "Did you mean $fixedEmail? Please correct the typo."
+                        emailError = true
+                        emailFocusRequester.requestFocus()
+                        return@Button
+                    }
+
+                    // Run MailboxLayer verification FIRST - this determines if email is valid
+                    scope.launch {
                         try {
-                            // ✅ MailboxLayer verification (friendly messages only)
+                            // Show sending state
+                            isSendingVerification = true
+
                             val mailboxResult = verifyEmailWithMailboxLayer(email.text.trim())
 
-                            // Quick typo catch for very common mistakes
-                            val emailLower = email.text.trim().lowercase()
-                            val commonTypos = listOf(
-                                "gmai.com" to "gmail.com",
-                                "gmial.com" to "gmail.com",
-                                "gmal.com" to "gmail.com",
-                                "gmil.com" to "gmail.com",
-                                "gemail.com" to "gmail.com",
-                                "yaho.com" to "yahoo.com",
-                                "yahhoo.com" to "yahoo.com",
-                                "yahooo.com" to "yahoo.com",
-                                "hotmai.com" to "hotmail.com",
-                                "hotmal.com" to "hotmail.com",
-                                "outlok.com" to "outlook.com"
-                            )
+                            withContext(Dispatchers.Main) {
+                                if (!mailboxResult.isValidSyntax) {
+                                    // Invalid email format - show error, don't send email
+                                    mailboxError = "⚠️ Please enter a valid email address."
+                                    emailError = true
+                                    emailFocusRequester.requestFocus()
+                                    isSendingVerification = false
+                                    return@withContext
+                                }
 
-                            var fixedEmail = emailLower
-                            var typoDetected = false
+                                if (!mailboxResult.isDeliverable) {
+                                    // Email doesn't exist - show error, don't send email
+                                    mailboxError = "⚠️ Please enter a valid, working email address."
+                                    emailError = true
+                                    emailFocusRequester.requestFocus()
+                                    isSendingVerification = false
+                                    return@withContext
+                                }
 
-                            for ((wrong, correct) in commonTypos) {
-                                if (fixedEmail.contains("@$wrong")) {
-                                    fixedEmail = fixedEmail.replace("@$wrong", "@$correct")
-                                    typoDetected = true
-                                    break
+                                // ✅ Email is valid AND deliverable - now send email and show success message
+                                try {
+                                    val emailTrimmed = email.text.trim()
+                                    val safeEmail = if (emailTrimmed.isNotEmpty()) emailTrimmed else "reneegithinji@yahoo.com"
+                                    val data = hashMapOf("email" to safeEmail)
+
+                                    Log.d("EMAIL_FUNCTION", "➡️ Sending email to: $safeEmail")
+
+                                    val result = functions.getHttpsCallable("sendVerificationEmail").call(data).await()
+
+                                    Log.d("EMAIL_FUNCTION", "✅ Email sent successfully, result: $result")
+
+                                    // Only show success message when email is valid AND deliverable
+                                    verificationSent = true
+                                    hasClickedSendEmail = true
+                                    showRedMessage = true
+                                    canResendEmail = false
+                                    emailTimer = 30
+                                    mailboxError = null
+                                    emailError = false
+                                    isSendingVerification = false
+
+                                } catch (e: Exception) {
+                                    Log.e("EMAIL_FUNCTION", "❌ Error sending verification email", e)
+                                    mailboxError = "Unable to send email. Please try again."
+                                    verificationSent = false
+                                    hasClickedSendEmail = false
+                                    showRedMessage = false
+                                    isSendingVerification = false
                                 }
                             }
-
-                            if (typoDetected) {
-                                mailboxError = "Did you mean $fixedEmail? Please correct the typo."
-                                emailError = true
-                                emailFocusRequester.requestFocus()
-                                return@launch
-                            }
-
-                            if (!mailboxResult.isDeliverable) {
-                                mailboxError = "Please enter a valid, working email address."
-                                emailError = false // keep this as-is
-                                emailFocusRequester.requestFocus()
-                                return@launch
-                            }
-
-                            // ✅ Send Firebase verification email
-                            val emailTrimmed = email.text.trim()
-                            val safeEmail =
-                                if (emailTrimmed.isNotEmpty()) emailTrimmed else "reneegithinji@yahoo.com"
-
-                            // ✅ Only one data map
-                            val data = hashMapOf(
-                                "email" to safeEmail
-                            )
-
-                            try {
-                                Log.d("EMAIL_FUNCTION", "➡️ Data being sent to Firebase: $data")
-
-                                val result =
-                                    functions.getHttpsCallable("sendVerificationEmail").call(data)
-                                        .await()
-                                Log.d("EMAIL_FUNCTION", "✅ Function call SUCCESS, result: $result")
-                            } catch (e: Exception) {
-                                Log.e("EMAIL_FUNCTION", "❌ Error sending verification email", e)
-                            }
-                            // ✅ Update UI states on success
-                            verificationSent = true
-                            hasClickedSendEmail = true
-                            showRedMessage = true
-                            canResendEmail = false
-                            emailTimer = 30
-                            mailboxError = null
-
                         } catch (e: Exception) {
-                            Log.e("EMAIL_FUNCTION", "Error sending verification email", e)
-                            // Always show a friendly message, never raw network errors
-                            mailboxError = "Unable to send email. Please try again later."
-                            verificationSent = false
-                            hasClickedSendEmail = false
-                            showRedMessage = false
+                            Log.e("EMAIL_FUNCTION", "Verification failed", e)
+                            withContext(Dispatchers.Main) {
+                                mailboxError = "Unable to verify email. Please try again."
+                                isSendingVerification = false
+                            }
                         }
                     }
                 } else {
@@ -803,25 +819,30 @@ fun SignupScreen(
                     mailboxError = null
                 }
             },
-            enabled = emailTimer == 0,
+            enabled = emailTimer == 0 && !isSendingVerification,
             modifier = Modifier
                 .height(44.dp)
                 .width(150.dp)
                 .align(Alignment.End)
-                .offset(x = emailShakeOffset.floatValue.dp),  // ← shake applied here
+                .offset(x = emailShakeOffset.floatValue.dp),
             colors = ButtonDefaults.buttonColors(
-                containerColor = if (emailTimer == 0) Color.Black else Color.LightGray,
+                containerColor = if (emailTimer == 0 && !isSendingVerification) Color.Black else Color.LightGray,
                 contentColor = Color.White,
                 disabledContainerColor = Color.LightGray
             ),
             shape = RoundedCornerShape(12.dp)
         ) {
             Text(
-                text = if (emailTimer > 0) "Sending..." else "Send Email Link",
+                text = when {
+                    isSendingVerification -> "Verifying..."
+                    emailTimer > 0 -> "Sending..."
+                    else -> "Send Email Link"
+                },
                 color = Color.White,
                 fontSize = 12.sp
             )
         }
+
 // --- Resend Email / Timer (Clean Swap Version) ---
         if (hasClickedSendEmail) {
             Row(
