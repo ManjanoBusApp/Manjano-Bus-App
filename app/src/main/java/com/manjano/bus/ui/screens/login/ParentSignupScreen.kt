@@ -98,8 +98,8 @@ import kotlinx.coroutines.runBlocking
 import androidx.compose.ui.draw.alpha
 import com.google.firebase.functions.FirebaseFunctions
 import kotlinx.coroutines.tasks.await
-
-
+import com.manjano.bus.MainActivity
+import androidx.compose.runtime.DisposableEffect
 
 data class MailboxLayerResult(
     val isValidSyntax: Boolean,
@@ -336,6 +336,10 @@ fun SignupScreen(
     val emailShakeOffset = remember { androidx.compose.runtime.mutableFloatStateOf(0f) }
     val functions = remember { FirebaseFunctions.getInstance("us-central1") }
 
+    // 🔥 NEW: Get SharedPreferences for loading saved data
+    val prefs = context.getSharedPreferences("pending_signup", Context.MODE_PRIVATE)
+
+
     LaunchedEffect(Unit) {
         parentFocusRequester.requestFocus()
     }
@@ -416,7 +420,34 @@ fun SignupScreen(
         var childErrors by remember { mutableStateOf(listOf(false)) }
         var hasTouchedChild by remember { mutableStateOf(listOf(false)) }
 
+        // 🔥 LOAD SAVED DATA WHEN SCREEN OPENS
+        LaunchedEffect(Unit) {
+            val savedParentName = prefs.getString("pending_parent_name", "") ?: ""
+            val savedChildren = prefs.getString("pending_children", "") ?: ""
+            val savedEmail = prefs.getString("pending_email", "") ?: ""
 
+            Log.d("🔥", "Loading saved data - Parent: $savedParentName")
+            Log.d("🔥", "Loading saved data - Email: $savedEmail")
+            Log.d("🔥", "Loading saved data - Children: $savedChildren")
+
+            // Restore parent name
+            if (savedParentName.isNotEmpty()) {
+                parentName = TextFieldValue(savedParentName)
+            }
+
+            // Restore email
+            if (savedEmail.isNotEmpty()) {
+                email = TextFieldValue(savedEmail)
+            }
+
+            // Restore children names
+            if (savedChildren.isNotEmpty()) {
+                val childrenList = savedChildren.split("|||")
+                childrenNames = childrenList.map { TextFieldValue(it) }
+                childErrors = List(childrenList.size) { false }
+                hasTouchedChild = List(childrenList.size) { true }
+            }
+        }
 // Add new child
         val addChild = {
             val newChildren = childrenNames.toMutableList().apply { add(TextFieldValue("")) }
@@ -446,7 +477,8 @@ fun SignupScreen(
                     OutlinedTextField(
                         value = childName,
                         onValueChange = { newValue ->
-                            val filtered = newValue.text.filter { it.isLetter() || it.isWhitespace() }
+                            val filtered =
+                                newValue.text.filter { it.isLetter() || it.isWhitespace() }
                             val updatedChildren = childrenNames.toMutableList()
                             val updatedTouched = hasTouchedChild.toMutableList()
                             updatedChildren[index] = newValue.copy(text = filtered)
@@ -568,6 +600,9 @@ fun SignupScreen(
                 email = it
                 emailError = false
 
+                prefs.edit().clear().apply()
+                MainActivity.clearVerification()
+
                 // 🔥 FULL RESET when user edits email
                 verificationSent = false
                 hasClickedSendEmail = false
@@ -631,14 +666,32 @@ fun SignupScreen(
                 val hasEmptyChild = childErrors.any { it }
 
                 hasTouchedEmail = true
-                emailError = email.text.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.text).matches()
+                emailError =
+                    email.text.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.text).matches()
 
                 Log.d("EMAIL_DEBUG", "Email text: '${email.text}'")
                 Log.d("EMAIL_DEBUG", "Is blank: ${email.text.isBlank()}")
-                Log.d("EMAIL_DEBUG", "Matches pattern: ${Patterns.EMAIL_ADDRESS.matcher(email.text).matches()}")
+                Log.d(
+                    "EMAIL_DEBUG",
+                    "Matches pattern: ${Patterns.EMAIL_ADDRESS.matcher(email.text).matches()}"
+                )
                 Log.d("EMAIL_DEBUG", "emailError: $emailError")
 
                 val isFormValid = !parentError && !hasEmptyChild && !emailError
+
+                if (isFormValid) {
+                    val prefs = context.getSharedPreferences("pending_signup", Context.MODE_PRIVATE)
+                    prefs.edit().apply {
+                        putString("pending_parent_name", parentName.text)
+                        putString("pending_email", email.text)
+                        // Save children names
+                        val childrenList = childrenNames.map { it.text }.joinToString("|||")
+                        putString("pending_children", childrenList)
+                        putBoolean("pending_verification", true)
+                        apply()
+                    }
+                    Log.d("🔥", "Form data saved: ${parentName.text}, ${email.text}")
+                }
 
                 if (isFormValid) {
                     mailboxError = null
@@ -657,7 +710,8 @@ fun SignupScreen(
 
                             // ✅ Send Firebase verification email
                             val emailTrimmed = email.text.trim()
-                            val safeEmail = if (emailTrimmed.isNotEmpty()) emailTrimmed else "reneegithinji@yahoo.com"
+                            val safeEmail =
+                                if (emailTrimmed.isNotEmpty()) emailTrimmed else "reneegithinji@yahoo.com"
 
 // ✅ Only one data map
                             val data = hashMapOf(
@@ -667,7 +721,9 @@ fun SignupScreen(
                             try {
                                 Log.d("EMAIL_FUNCTION", "➡️ Data being sent to Firebase: $data")
 
-                                val result = functions.getHttpsCallable("sendVerificationEmail").call(data).await()
+                                val result =
+                                    functions.getHttpsCallable("sendVerificationEmail").call(data)
+                                        .await()
                                 Log.d("EMAIL_FUNCTION", "✅ Function call SUCCESS, result: $result")
                             } catch (e: Exception) {
                                 Log.e("EMAIL_FUNCTION", "❌ Error sending verification email", e)
@@ -796,6 +852,38 @@ fun SignupScreen(
 
         val phoneFocusRequester = remember { FocusRequester() }
 
+        // 🔥 VERIFICATION HANDLER - moved here inside the Column after phoneFocusRequester
+        LaunchedEffect(Unit) {
+            // Wait a moment for data to load
+            delay(500)
+
+            val hasPending = MainActivity.hasPendingVerification()
+            val pendingEmail = MainActivity.verificationEmail.value
+
+            Log.d("🔥", "Verification check - hasPending: $hasPending")
+            Log.d("🔥", "Verification check - pendingEmail: $pendingEmail")
+            Log.d("🔥", "Current email text: ${email.text}")
+
+            if (hasPending && pendingEmail != null && email.text == pendingEmail) {
+                Log.d("🔥", "✅ Auto-verifying email: $pendingEmail")
+                emailVerified = true
+
+                // Clear verification flag only after successful verification
+                MainActivity.clearVerification()
+
+                scope.launch {
+                    snackbarHostState.showSnackbar(
+                        message = "✅ Email verified! You can now enter your phone number",
+                        withDismissAction = true
+                    )
+                }
+
+                // Auto-focus on phone number field
+                delay(500)
+                phoneFocusRequester.requestFocus()
+            }
+        }
+
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -812,7 +900,9 @@ fun SignupScreen(
             PhoneInputSection(
                 selectedCountry = selectedCountry,
                 phoneNumber = phoneNumber,
-                onCountrySelected = { if (emailVerified) selectedCountry = it },  // block change if not verified
+                onCountrySelected = {
+                    if (emailVerified) selectedCountry = it
+                },  // block change if not verified
                 onPhoneNumberChange = { newNumber ->
                     if (emailVerified) {
                         phoneNumber = newNumber
@@ -914,8 +1004,9 @@ fun SignupScreen(
                         studentError = hasEmptyChild
 
                         hasTouchedEmail = true
-                        emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
-                            .matches()
+                        emailError =
+                            email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
+                                .matches()
 
                         // --- Step 4: Reset phone error UI + mark as touched ---
                         phoneError = false
@@ -937,7 +1028,8 @@ fun SignupScreen(
                             phoneErrorText = "Can't proceed, contact the school"
                             phoneError = true
                         } else if (!isValidFormat) {
-                            phoneErrorText = ""   // let the invalid message show via phoneErrorInvalid
+                            phoneErrorText =
+                                ""   // let the invalid message show via phoneErrorInvalid
                         }
                         // --- Step 6: Overall validity check ---
                         val canProceed =
@@ -965,6 +1057,7 @@ fun SignupScreen(
                                     val firstEmpty = childErrors.indexOfFirst { it }
                                     if (firstEmpty >= 0) studentFocusRequester.requestFocus()
                                 }
+
                                 emailError -> emailFocusRequester.requestFocus()
                                 phoneNotAllowed -> phoneFocusRequester.requestFocus()
                             }
@@ -1181,6 +1274,7 @@ fun SignupScreen(
                                 val firstEmpty = childErrors.indexOfFirst { it }
                                 if (firstEmpty >= 0) studentFocusRequester.requestFocus()
                             }
+
                             emailError -> emailFocusRequester.requestFocus()
                         }
                     }
@@ -1220,15 +1314,23 @@ fun SignupScreen(
                 fontWeight = FontWeight.Bold,
                 textDecoration = TextDecoration.Underline,
                 modifier = Modifier.clickable {
-                    // include role argument because AppNavGraph expects "signin/{role}"
                     navController.navigate("signin/parent")
                 }
             )
 
         }
     }
+
+    // 🔥 Clear saved data when user leaves signup screen (after successful verification)
+    DisposableEffect(Unit) {
+        onDispose {
+            // Only clear if verification was successful
+            if (emailVerified) {
+                Log.d("🔥", "Clearing saved data - verification was successful")
+                val prefs = context.getSharedPreferences("pending_signup", Context.MODE_PRIVATE)
+                prefs.edit().clear().apply()
+                MainActivity.clearVerification()
+            }
+        }
+    }
 }
-
-
-
-

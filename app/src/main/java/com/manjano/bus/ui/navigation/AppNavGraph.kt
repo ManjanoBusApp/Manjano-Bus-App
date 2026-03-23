@@ -1,6 +1,7 @@
 package com.manjano.bus.ui.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
@@ -28,14 +29,25 @@ import com.manjano.bus.ui.screens.adminpanel.ProfileEditScreen
 import com.manjano.bus.ui.screens.adminpanel.AttendanceVerificationScreen
 import com.manjano.bus.ui.screens.adminpanel.DriverCommunicationScreen
 import com.manjano.bus.ui.screens.login.AdminSignInScreen
+import com.manjano.bus.MainActivity
 
 @Composable
-fun AppNavGraph(navController: NavHostController) {
+fun AppNavGraph(
+    navController: NavHostController,
+    startAtSignup: Boolean = false
+) {
+    // Determine start destination
+    val startDestination = if (startAtSignup) {
+        "signup"
+    } else {
+        "welcome"
+    }
+
+
     NavHost(
         navController = navController,
-        startDestination = "welcome"
+        startDestination = startDestination
     ) {
-
         // Welcome
         composable("welcome") { _: NavBackStackEntry ->
             WelcomeScreen(
@@ -172,4 +184,4 @@ fun AppNavGraph(navController: NavHostController) {
         }
 
     }
-} // End of NavHost
+}
