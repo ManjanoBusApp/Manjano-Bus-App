@@ -1199,6 +1199,12 @@ fun SignupScreen(
                 onOtpChange = { digits: List<String> ->
                     if (emailVerified) {
                         showOtpMessage = false
+
+                        // 🔥 RESET OTP SENDING STATE when user starts typing
+                        if (digits.any { it.isNotEmpty() }) {
+                            signupViewModel.resetOtpSendingState()
+                        }
+
                         digits.forEachIndexed { index, digit ->
                             signupViewModel.onOtpDigitChange(index, digit)
                             otpBoxErrors[index] = digit.isEmpty()
@@ -1236,7 +1242,7 @@ fun SignupScreen(
                 onAutoVerify = {},
                 isSending = uiState.isOtpSubmitting,
                 focusRequester = otpFocusRequester,
-                emailVerified = emailVerified   // ← ADD THIS LINE (very last argument)
+                emailVerified = emailVerified
             )
         }
         Spacer(modifier = Modifier.height(12.dp))

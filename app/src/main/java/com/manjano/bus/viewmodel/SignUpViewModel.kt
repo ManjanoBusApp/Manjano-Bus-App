@@ -54,6 +54,7 @@ class SignUpViewModel : ViewModel() {
     private val _alreadyRegisteredError = MutableStateFlow<String?>(null)
     val alreadyRegisteredError: StateFlow<String?> = _alreadyRegisteredError.asStateFlow()
 
+    private var shouldStopTimer = false
     fun setAlreadyRegisteredError(message: String?) {
         _alreadyRegisteredError.value = message
     }
@@ -139,7 +140,20 @@ class SignUpViewModel : ViewModel() {
         _uiState.value = _uiState.value.copy(showSmsMessage = false)
     }
 
+    fun resetOtpSendingState() {
+        Log.d("OTP_DEBUG", "resetOtpSendingState called - stopping timer")
+        shouldStopTimer = true
+
+        _uiState.value = _uiState.value.copy(
+            isSendingOtp = false,
+            canResendOtp = true,
+            resendTimerSeconds = 0
+        )
+    }
     fun requestOtp() {
+        // Reset the stop flag when requesting new OTP
+        shouldStopTimer = false
+
         _uiState.value = _uiState.value.copy(
             isSendingOtp = true,
             resendTimerSeconds = resendDuration,
@@ -147,23 +161,33 @@ class SignUpViewModel : ViewModel() {
         )
         viewModelScope.launch {
             delay(2000)
-            _uiState.value = _uiState.value.copy(isSendingOtp = false)
-            startResendTimer()
+            // Only continue if not stopped by user typing
+            if (!shouldStopTimer) {
+                _uiState.value = _uiState.value.copy(isSendingOtp = false)
+                // Only start the timer if still not stopped
+                if (!shouldStopTimer) {
+                    startResendTimer()
+                }
+            }
         }
     }
 
     private fun startResendTimer() {
         viewModelScope.launch {
             var seconds = resendDuration
-            while (seconds > 0) {
+            while (seconds > 0 && !shouldStopTimer) {
                 _uiState.value = _uiState.value.copy(resendTimerSeconds = seconds)
                 delay(1000)
                 seconds--
             }
-            _uiState.value = _uiState.value.copy(
-                canResendOtp = true,
-                resendTimerSeconds = 0
-            )
+            if (!shouldStopTimer) {
+                _uiState.value = _uiState.value.copy(
+                    canResendOtp = true,
+                    resendTimerSeconds = 0
+                )
+            }
+            // Reset flag for next OTP request
+            shouldStopTimer = false
         }
     }
 

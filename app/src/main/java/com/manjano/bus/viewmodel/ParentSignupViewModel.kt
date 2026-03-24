@@ -41,8 +41,7 @@ class ParentSignupViewModel : ViewModel() {
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
                 capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
     }
-
-    fun saveParentAndChildren(
+        fun saveParentAndChildren(
         parentName: String,
         childrenNames: String,
         context: Context
