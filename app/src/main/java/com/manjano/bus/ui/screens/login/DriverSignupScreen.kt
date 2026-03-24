@@ -487,6 +487,12 @@ fun DriverSignupScreen(
             shouldShakeOtp = uiState.shouldShakeOtp,
             onOtpChange = { digits: List<String> ->
                 showOtpMessage = false
+
+                // 🔥 RESET OTP SENDING STATE when user starts typing
+                if (digits.any { it.isNotEmpty() }) {
+                    signupViewModel.resetOtpSendingState()
+                }
+
                 digits.forEachIndexed { index, digit ->
                     signupViewModel.onOtpDigitChange(index, digit)
                 }
@@ -523,6 +529,7 @@ fun DriverSignupScreen(
             isSending = uiState.isOtpSubmitting,
             focusRequester = otpFocusRequester
         )
+
         Spacer(modifier = Modifier.height(12.dp))
 
         val isOtpValid by signupViewModel.isOtpValid.collectAsState()
