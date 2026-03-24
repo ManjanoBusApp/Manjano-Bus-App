@@ -515,16 +515,24 @@ fun SignInScreen(
                 derivedStateOf { isPhoneAllowed == true }
             }
 
-// 3. Final button enabled state – NO isOtpCorrect condition
+// 3. Final button enabled state – MUST have correct OTP
+            val isOtpCorrect by remember(uiState.otpDigits) {
+                derivedStateOf {
+                    uiState.otpDigits.joinToString("") == Constants.TEST_OTP
+                }
+            }
+
             val isContinueEnabled by remember(
                 isOtpComplete,
                 phoneAllowed,
-                uiState.isOtpSubmitting
+                uiState.isOtpSubmitting,
+                isOtpCorrect
             ) {
                 derivedStateOf {
                     isOtpComplete &&
                             phoneAllowed &&
-                            !uiState.isOtpSubmitting
+                            !uiState.isOtpSubmitting &&
+                            isOtpCorrect  // ← ADD THIS: OTP must be correct
                 }
             }
 
