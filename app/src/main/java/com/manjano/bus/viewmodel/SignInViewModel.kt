@@ -63,7 +63,7 @@ class SignInViewModel : ViewModel() {
     val uiState: StateFlow<SignInUiState> = _uiState
 
     private var userRole: String? = null
-
+    private var isTimerCancelled = false
     fun setUserRole(role: String) {
         userRole = role.lowercase()
     }
@@ -84,6 +84,10 @@ class SignInViewModel : ViewModel() {
     fun resetOtpSendingState() {
         Log.d("OTP_DEBUG", "resetOtpSendingState called - stopping timer")
         shouldStopTimer = true
+        isTimerCancelled = true  // ← ADD THIS - mark timer as cancelled
+
+        // Cancel any running resend timer
+        resendTimerJob?.cancel()
 
         _uiState.value = _uiState.value.copy(
             isSendingOtp = false,
@@ -272,7 +276,7 @@ class SignInViewModel : ViewModel() {
     fun requestOtp() {
         // Reset the stop flag when requesting new OTP
         shouldStopTimer = false
-
+        isTimerCancelled = false
         if (_uiState.value.isSendingOtp) return
 
         _uiState.value = _uiState.value.copy(
@@ -473,18 +477,22 @@ class SignInViewModel : ViewModel() {
     // --- Countdown timer for resend ---
     fun startResendTimer() {
         resendTimerJob?.cancel()
+        isTimerCancelled = false  // ← ADD THIS - reset when starting new timer
         resendTimerJob = viewModelScope.launch {
             var seconds = _uiState.value.resendTimerSeconds
-            while (seconds > 0 && !shouldStopTimer) {
+            while (seconds > 0 && !shouldStopTimer && !isTimerCancelled) {
                 delay(1000)
                 seconds--
                 _uiState.value = _uiState.value.copy(resendTimerSeconds = seconds)
             }
-            if (!shouldStopTimer) {
+            // Only update if not cancelled by user typing
+            if (!shouldStopTimer && !isTimerCancelled) {
                 _uiState.value = _uiState.value.copy(canResendOtp = true)
             }
-            // Reset flag for next OTP request
-            shouldStopTimer = false
+            // Reset flag for next OTP request - but only if not cancelled
+            if (!isTimerCancelled) {
+                shouldStopTimer = false
+            }
         }
     }
 
