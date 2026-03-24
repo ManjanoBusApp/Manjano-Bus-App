@@ -364,7 +364,7 @@ fun SignupScreen(
 
 
         Image(
-            painter = painterResource(id = R.drawable.ic_bus),
+            painter = painterResource(id = R.drawable.ic_logo),
             contentDescription = "App Icon",
             modifier = Modifier
                 .size(60.dp)

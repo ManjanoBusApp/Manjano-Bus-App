@@ -48,7 +48,7 @@ fun WelcomeScreen(
 
             // App logo (centered, 60.dp)
             Image(
-                painter = painterResource(id = R.drawable.ic_bus),
+                painter = painterResource(id = R.drawable.ic_logo),
                 contentDescription = "App Logo",
                 modifier = Modifier
                     .size(60.dp)
