@@ -404,6 +404,11 @@ fun SignInScreen(
 
                     viewModel.hideSmsMessage()
 
+                    // 🔥 RESET OTP SENDING STATE when user starts typing
+                    if (digits.any { it.isNotEmpty() }) {
+                        viewModel.resetOtpSendingState()
+                    }
+
                     digits.forEachIndexed { index, digit ->
                         viewModel.onOtpDigitChange(index, digit) {
                             keyboardController?.hide()
@@ -467,22 +472,24 @@ fun SignInScreen(
 
 
 //     Auto-refocus first OTP box + show keyboard after failed verification
-
             LaunchedEffect(uiState.showOtpError, uiState.otpDigits) {
+                // Only run when there's an actual error AND the OTP is completely empty
+                // AND the user is NOT currently typing (isSendingOtp is false after reset)
                 if (uiState.showOtpError == true &&
                     uiState.otpDigits.all { it.isEmpty() } &&
-                    uiState.otpErrorMessage?.isNotBlank() == true
+                    uiState.otpErrorMessage?.isNotBlank() == true &&
+                    !uiState.isSendingOtp  // ← ADD THIS: don't run while button is in sending state
                 ) {
 
                     // Give shake animation + error visibility time to settle
-                    delay(180)           // ← tune between 120–300 ms if needed
+                    delay(180)
 
                     // Important sequence from the working file
-                    focusManager.clearFocus()           // reset any stale focus
-                    delay(60)                           // tiny breath
+                    focusManager.clearFocus()
+                    delay(60)
 
-                    otpFocusRequester.requestFocus()    // request on first box
-                    keyboardController?.show()          // explicitly show keyboard
+                    otpFocusRequester.requestFocus()
+                    keyboardController?.show()
                 }
             }
             val continueShakeOffset = remember { mutableFloatStateOf(0f) }

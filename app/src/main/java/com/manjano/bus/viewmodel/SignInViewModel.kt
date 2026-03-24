@@ -79,6 +79,18 @@ class SignInViewModel : ViewModel() {
     private val _isSignedUp = MutableStateFlow<Boolean?>(null)       // has name / children
     val isSignedUp: StateFlow<Boolean?> = _isSignedUp
 
+    private var shouldStopTimer = false
+
+    fun resetOtpSendingState() {
+        Log.d("OTP_DEBUG", "resetOtpSendingState called - stopping timer")
+        shouldStopTimer = true
+
+        _uiState.value = _uiState.value.copy(
+            isSendingOtp = false,
+            canResendOtp = true,
+            resendTimerSeconds = 0
+        )
+    }
     fun checkPhoneNumberInFirestore(phone: String, countryIso: String) {
         val db = FirebaseFirestore.getInstance()
 
@@ -258,6 +270,9 @@ class SignInViewModel : ViewModel() {
 
     // --- Request OTP (updated for single tap + proper messages) ---
     fun requestOtp() {
+        // Reset the stop flag when requesting new OTP
+        shouldStopTimer = false
+
         if (_uiState.value.isSendingOtp) return
 
         _uiState.value = _uiState.value.copy(
@@ -330,16 +345,24 @@ class SignInViewModel : ViewModel() {
                     try {
                         delay(1500) // simulate send
 
-                        _uiState.value = _uiState.value.copy(
-                            isSendingOtp = false,
-                            otpRequestSuccess = true,
-                            showSmsMessage = true,
-                            resendTimerSeconds = 30,
-                            canResendOtp = false,
-                            sentOtp = Constants.TEST_OTP // dev only
-                        )
+                        // Only update if not stopped by user typing
+                        if (!shouldStopTimer) {
+                            _uiState.value = _uiState.value.copy(
+                                isSendingOtp = false,
+                                otpRequestSuccess = true,
+                                showSmsMessage = true,
+                                resendTimerSeconds = 30,
+                                canResendOtp = false,
+                                sentOtp = Constants.TEST_OTP // dev only
+                            )
 
-                        startResendTimer()
+                            startResendTimer()
+                        } else {
+                            // If stopped, just reset the sending state
+                            _uiState.value = _uiState.value.copy(
+                                isSendingOtp = false
+                            )
+                        }
                     } catch (e: Exception) {
                         _uiState.value = _uiState.value.copy(
                             isSendingOtp = false,
@@ -350,7 +373,6 @@ class SignInViewModel : ViewModel() {
             }
         }
     }
-
     fun hideSmsMessage() {
         _uiState.value = _uiState.value.copy(showSmsMessage = false)
     }
@@ -453,12 +475,16 @@ class SignInViewModel : ViewModel() {
         resendTimerJob?.cancel()
         resendTimerJob = viewModelScope.launch {
             var seconds = _uiState.value.resendTimerSeconds
-            while (seconds > 0) {
+            while (seconds > 0 && !shouldStopTimer) {
                 delay(1000)
                 seconds--
                 _uiState.value = _uiState.value.copy(resendTimerSeconds = seconds)
             }
-            _uiState.value = _uiState.value.copy(canResendOtp = true)
+            if (!shouldStopTimer) {
+                _uiState.value = _uiState.value.copy(canResendOtp = true)
+            }
+            // Reset flag for next OTP request
+            shouldStopTimer = false
         }
     }
 
