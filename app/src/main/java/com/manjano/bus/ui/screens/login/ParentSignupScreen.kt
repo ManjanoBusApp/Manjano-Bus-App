@@ -103,7 +103,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.clickable
-
+import androidx.compose.runtime.collectAsState
 
 data class MailboxLayerResult(
     val isValidSyntax: Boolean,
@@ -293,6 +293,7 @@ fun SignupScreen(
     // ========================
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+
 
     LaunchedEffect(uiState.showOtpError) {
         if (uiState.showOtpError) {
@@ -747,16 +748,18 @@ fun SignupScreen(
                         return@Button
                     }
 
-                    // Run MailboxLayer verification FIRST - this determines if email is valid
+                    // Bypass MailboxLayer for testing (remove this when API key is renewed)
                     scope.launch {
                         try {
-                            // Show sending state
                             isSendingVerification = true
 
-                            val mailboxResult = verifyEmailWithMailboxLayer(email.text.trim())
+                            // Skip MailboxLayer check - allow any email for testing
+                            // Just do a simple format check
+                            val emailText = email.text.trim()
+                            val isValidFormat = Patterns.EMAIL_ADDRESS.matcher(emailText).matches()
 
                             withContext(Dispatchers.Main) {
-                                if (!mailboxResult.isValidSyntax) {
+                                if (!isValidFormat) {
                                     // Invalid email format - show error, don't send email
                                     mailboxError = "⚠️ Please enter a valid email address."
                                     emailError = true
@@ -765,26 +768,25 @@ fun SignupScreen(
                                     return@withContext
                                 }
 
-                                if (!mailboxResult.isDeliverable) {
-                                    // Email doesn't exist - show error, don't send email
-                                    mailboxError = "⚠️ Please enter a valid, working email address."
-                                    emailError = true
-                                    emailFocusRequester.requestFocus()
-                                    isSendingVerification = false
-                                    return@withContext
-                                }
-
-                                // ✅ Email is valid AND deliverable - now send email and show success message
+                                // ✅ Email format is valid - now send email (skip deliverability check)
                                 try {
                                     val emailTrimmed = email.text.trim()
-                                    val safeEmail = if (emailTrimmed.isNotEmpty()) emailTrimmed else "reneegithinji@yahoo.com"
+                                    val safeEmail =
+                                        if (emailTrimmed.isNotEmpty()) emailTrimmed else "reneegithinji@yahoo.com"
                                     val data = hashMapOf("email" to safeEmail)
 
-                                    Log.d("EMAIL_FUNCTION", "➡️ Sending email to: $safeEmail")
+                                    Log.d(
+                                        "EMAIL_FUNCTION",
+                                        "➡️ Sending email to: $safeEmail (MailboxLayer bypassed)"
+                                    )
 
-                                    val result = functions.getHttpsCallable("sendVerificationEmail").call(data).await()
+                                    val result = functions.getHttpsCallable("sendVerificationEmail")
+                                        .call(data).await()
 
-                                    Log.d("EMAIL_FUNCTION", "✅ Email sent successfully, result: $result")
+                                    Log.d(
+                                        "EMAIL_FUNCTION",
+                                        "✅ Email sent successfully, result: $result"
+                                    )
 
                                     // Only show success message when email is valid AND deliverable
                                     verificationSent = true
@@ -926,23 +928,23 @@ fun SignupScreen(
 
         val phoneFocusRequester = remember { FocusRequester() }
 
-        // 🔥 VERIFICATION HANDLER - moved here inside the Column after phoneFocusRequester
-        LaunchedEffect(Unit) {
-            // Wait a moment for data to load
-            delay(500)
-
+        // 🔥 Listen for verification status changes (when app opens from deep link)
+        // This runs whenever pendingVerification changes
+        LaunchedEffect(MainActivity.pendingVerification.collectAsState().value) {
             val hasPending = MainActivity.hasPendingVerification()
             val pendingEmail = MainActivity.verificationEmail.value
 
-            Log.d("🔥", "Verification check - hasPending: $hasPending")
-            Log.d("🔥", "Verification check - pendingEmail: $pendingEmail")
+            Log.d(
+                "🔥",
+                "Verification status changed - hasPending: $hasPending, pendingEmail: $pendingEmail"
+            )
             Log.d("🔥", "Current email text: ${email.text}")
 
             if (hasPending && pendingEmail != null && email.text == pendingEmail) {
-                Log.d("🔥", "✅ Auto-verifying email: $pendingEmail")
+                Log.d("🔥", "✅ Setting emailVerified = true - ungrays sections")
                 emailVerified = true
 
-                // Clear verification flag only after successful verification
+                // Clear verification flag
                 MainActivity.clearVerification()
 
                 scope.launch {
@@ -952,12 +954,40 @@ fun SignupScreen(
                     )
                 }
 
-                // Auto-focus on phone number field
                 delay(500)
                 phoneFocusRequester.requestFocus()
             }
         }
 
+        // 🔥 Initial check when screen loads (handles case where verification was already pending)
+        LaunchedEffect(Unit) {
+            delay(1000) // Give time for data to load
+
+            val hasPending = MainActivity.hasPendingVerification()
+            val pendingEmail = MainActivity.verificationEmail.value
+
+            Log.d(
+                "🔥",
+                "Initial verification check - hasPending: $hasPending, pendingEmail: $pendingEmail"
+            )
+            Log.d("🔥", "Current email text: ${email.text}")
+
+            if (hasPending && pendingEmail != null && email.text == pendingEmail) {
+                Log.d("🔥", "✅ Initial check - setting emailVerified = true")
+                emailVerified = true
+                MainActivity.clearVerification()
+
+                scope.launch {
+                    snackbarHostState.showSnackbar(
+                        message = "✅ Email verified! You can now enter your phone number",
+                        withDismissAction = true
+                    )
+                }
+
+                delay(500)
+                phoneFocusRequester.requestFocus()
+            }
+        }
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1032,15 +1062,6 @@ fun SignupScreen(
 
         Spacer(modifier = Modifier.height(16.dp))
 
-        SnackbarHost(
-            hostState = snackbarHostState
-        ) { data ->
-            Snackbar(
-                snackbarData = data,
-                containerColor = Color.Red,   // Red background for error
-                contentColor = Color.White     // White text for contrast
-            )
-        }
 
         val isOtpCoolingDown by remember(uiState.resendTimerSeconds) {
             derivedStateOf { uiState.resendTimerSeconds > 0 }
@@ -1344,6 +1365,13 @@ fun SignupScreen(
                             .set(updateData, SetOptions.merge())
                             .addOnSuccessListener {
                                 Log.d("🔥", "Parent extra fields merged in Firestore")
+
+                                // 🔥 CREATE USER DOCUMENT IN USERS COLLECTION
+                                signupViewModel.createUserDocument(
+                                    email = email.text.trim(),
+                                    name = parentName.text.trim(),
+                                    role = "parent"
+                                )
                             }
                             .addOnFailureListener { e ->
                                 Log.e("🔥", "Failed to merge parent fields", e)
@@ -1424,19 +1452,6 @@ fun SignupScreen(
                 }
             )
 
-        }
-    }
-
-    // 🔥 Clear saved data when user leaves signup screen (after successful verification)
-    DisposableEffect(Unit) {
-        onDispose {
-            // Only clear if verification was successful
-            if (emailVerified) {
-                Log.d("🔥", "Clearing saved data - verification was successful")
-                val prefs = context.getSharedPreferences("pending_signup", Context.MODE_PRIVATE)
-                prefs.edit().clear().apply()
-                MainActivity.clearVerification()
-            }
         }
     }
 }

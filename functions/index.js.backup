@@ -1,0 +1,175 @@
+const { onCall } = require("firebase-functions/v2/https");
+const { logger } = require("firebase-functions/v2");
+const admin = require('firebase-admin');
+const nodemailer = require("nodemailer");
+const crypto = require('crypto');
+
+admin.initializeApp();
+
+const transporter = nodemailer.createTransport({
+    service: "yahoo",
+    auth: {
+        user: "reneegithinji@yahoo.com",
+        pass: "hpnzhrwgtuiuoxca"
+    }
+});
+
+// Generate a unique token
+function generateToken() {
+    return crypto.randomBytes(32).toString('hex');
+}
+
+// Send verification email with 2-minute expiry
+exports.sendVerificationEmail = onCall(async (request) => {
+    logger.info("Received request data:", request.data);
+
+    const email = request.data.email;
+
+    if (!email) {
+        logger.error("No email provided");
+        throw new Error("No email provided");
+    }
+
+    // Generate unique token
+    const token = generateToken();
+    const expiresAt = Date.now() + 2 * 60 * 1000; // 2 minutes from now
+
+    // Store token in Firestore with expiration
+    const tokenData = {
+        email: email,
+        token: token,
+        expiresAt: expiresAt,
+        used: false,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+    };
+
+    await admin.firestore().collection('verificationTokens').doc(token).set(tokenData);
+
+    // Create verification link with token
+    const webLink = `https://manjano-app.web.app/verify?token=${token}`;
+
+    logger.info("Generated verification link for:", email);
+    logger.info("Token expires at:", new Date(expiresAt).toISOString());
+
+    const logoUrl = "https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/App%20Assets%2Fic_logo.png?alt=media&token=96d7f4e2-2ac7-4731-887d-7d6bce42f552";
+
+    const mailOptions = {
+        from: "Manjano Bus App <reneegithinji@yahoo.com>",
+        to: email,
+        subject: "Verify your email - Manjano Bus App (Valid for 2 minutes)",
+        html: `
+            <div style="text-align: center; font-family: Arial, sans-serif;">
+                <h2>Verify Your Email Address</h2>
+                <p style="color: #666; margin-bottom: 20px;">This link will expire in <strong style="color: #800080;">2 minutes</strong></p>
+                <a href="${webLink}" style="
+                    background-color:#800080;
+                    color:white;
+                    padding:12px 24px;
+                    text-decoration:none;
+                    border-radius:5px;
+                    display:inline-block;
+                    font-size:16px;
+                    margin:20px 0;
+                ">Click to Verify Email</a>
+                <p style="color: #999; font-size: 12px; margin-top: 20px;">
+                    If you didn't request this, please ignore this email.<br>
+                    Link expires: ${new Date(expiresAt).toLocaleTimeString()}
+                </p>
+                <div style="margin-top: 40px;">
+                    <img src="${logoUrl}"
+                         alt="Manjano Bus App"
+                         style="width: 80px; height: auto; display: block; margin: 0 auto;"
+                         onerror="this.style.display='none'">
+                    <p style="color: #800080; font-size: 14px; margin-top: 8px;">Manjano Bus App</p>
+                </div>
+            </div>
+        `,
+        text: `
+Verify Your Email Address - Manjano Bus App
+
+This link will expire in 2 minutes.
+
+Click the link below to verify your email:
+
+${webLink}
+
+If you didn't request this, please ignore this email.
+Link expires: ${new Date(expiresAt).toLocaleString()}
+        `
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        logger.info("Email sent successfully to:", email);
+        return { success: true, message: "Verification email sent. Valid for 2 minutes." };
+    } catch (err) {
+        logger.error("Email error:", err);
+        throw new Error("Failed to send email: " + err.message);
+    }
+});
+
+// Verify the token when user clicks the link
+exports.verifyEmail = onCall(async (request) => {
+    const { token } = request.data;
+
+    if (!token) {
+        throw new Error("No verification token provided");
+    }
+
+    // Get token from Firestore
+    const tokenDoc = await admin.firestore().collection('verificationTokens').doc(token).get();
+
+    if (!tokenDoc.exists) {
+        return {
+            success: false,
+            error: "invalid",
+            message: "Invalid verification link. Please request a new one."
+        };
+    }
+
+    const tokenData = tokenDoc.data();
+
+    // Check if already used
+    if (tokenData.used) {
+        return {
+            success: false,
+            error: "used",
+            message: "This link has already been used. Please request a new verification email."
+        };
+    }
+
+    // Check if expired
+    const now = Date.now();
+    if (now > tokenData.expiresAt) {
+        // Delete expired token
+        await admin.firestore().collection('verificationTokens').doc(token).delete();
+        return {
+            success: false,
+            error: "expired",
+            message: "Link expired, please go back to the app and request for another link."
+        };
+    }
+
+    // Mark token as used
+    await admin.firestore().collection('verificationTokens').doc(token).update({
+        used: true,
+        verifiedAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    // Update user's email verification status
+    const usersRef = admin.firestore().collection('users');
+    const userQuery = await usersRef.where('email', '==', tokenData.email).get();
+
+    if (!userQuery.empty) {
+        const userDoc = userQuery.docs[0];
+        await userDoc.ref.update({
+            emailVerified: true,
+            verifiedAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+    }
+
+    return {
+        success: true,
+        message: "Email verified successfully!"
+    };
+});
