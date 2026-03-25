@@ -43,6 +43,20 @@
                     android:host="verify" />
             </intent-filter>
 
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="manjanoapp" android:host="verification-success" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="manjanoapp" android:host="verification-failed" />
+            </intent-filter>
+
             <!-- 🔥 NEW: Deep link for https:// web links (opens app directly) -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />

@@ -13,6 +13,9 @@ import dagger.hilt.android.AndroidEntryPoint
 import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import android.content.Context
+
+
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
@@ -79,7 +82,33 @@ class MainActivity : FragmentActivity() {
         Log.d("🔥", "🔧 Scheme: ${uri.scheme}")
         Log.d("🔥", "🔧 Host: ${uri.host}")
 
-        // Check for manjanoapp:// scheme
+        // Check for manjanoapp://verification-success (SUCCESS - has email)
+        if (uri.scheme == "manjanoapp" && uri.host == "verification-success") {
+            Log.d("🔥", "✅ Verification SUCCESS deep link received")
+
+            // Get email from the deep link
+            val email = uri.getQueryParameter("email")
+
+            if (!email.isNullOrEmpty()) {
+                Log.d("🔥", "✅ Setting verification email: $email")
+                setVerificationEmail(email)
+            } else {
+                Log.d("🔥", "No email found in success deep link")
+            }
+            return
+        }
+
+        // Check for manjanoapp://verification-failed (ERROR - no verification)
+        if (uri.scheme == "manjanoapp" && uri.host == "verification-failed") {
+            Log.d("🔥", "❌ Verification FAILED deep link received - keeping sections grayed")
+            // Do NOT call setVerificationEmail()
+            // BUT we still need to go to signup screen so user can request a new link
+            _navigateToSignup.value = true
+            Log.d("🔥", "✅ Setting navigate to signup screen (failed verification)")
+            return
+        }
+
+        // Check for manjanoapp:// scheme (old)
         if (uri.scheme == "manjanoapp" && uri.host == "verify") {
             val email = uri.getQueryParameter("email")
             Log.d("🔥", "🔧 Extracted email from deep link: $email")

@@ -20,6 +20,10 @@ import java.nio.charset.StandardCharsets
 import com.manjano.bus.models.CountryRepository
 import com.manjano.bus.models.Country
 import kotlinx.coroutines.flow.asStateFlow
+import com.google.firebase.functions.FirebaseFunctions
+
+
+
 
 private fun sanitizeKey(name: String): String =
     name.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
@@ -92,7 +96,26 @@ class SignUpViewModel : ViewModel() {
                 }
         }
     }
-    // ====================================================================
+
+    fun createUserDocument(email: String, name: String, role: String) {
+        val functions = FirebaseFunctions.getInstance()
+        val createUser = functions.getHttpsCallable("createUserDocument")
+
+        val data = hashMapOf(
+            "email" to email,
+            "name" to name,
+            "role" to role,
+            "userId" to ""
+        )
+
+        createUser.call(data)
+            .addOnSuccessListener { result ->
+                Log.d("SignUp", "User document created successfully for: $email")
+            }
+            .addOnFailureListener { e ->
+                Log.e("SignUp", "Error creating user document: ${e.message}", e)
+            }
+    }
 
     private val resendDuration = 30 // seconds
 
@@ -470,8 +493,12 @@ class SignUpViewModel : ViewModel() {
             null // make _isPhoneAllowed: MutableStateFlow<Boolean?> = MutableStateFlow(null)
     }
 
-    fun saveUserNames(parentName: String, childrenNames: String, context: Context) {
-        Log.d("🔥", "Signup complete. No Firestore write required.")
+    fun saveUserNames(parentName: String, childrenNames: String, email: String, context: Context) {
+        Log.d("🔥", "Signup complete. Creating user document...")
+
+        // Create user document in Firestore
+        createUserDocument(email, parentName, "parent")
+
         _uiState.value = _uiState.value.copy(navigateToDashboard = true)
     }
 
