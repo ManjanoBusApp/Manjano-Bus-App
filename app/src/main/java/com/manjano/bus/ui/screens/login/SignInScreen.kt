@@ -574,6 +574,10 @@ fun SignInScreen(
             }
 
             SignUpFooter(onSignUpClick = {
+                // 🔥 Clear saved signup data before navigating to fresh signup form
+                val prefs = context.getSharedPreferences("pending_signup", Context.MODE_PRIVATE)
+                prefs.edit().clear().apply()
+
                 when (role) {
                     "driver" -> navController.navigate("driver_signup")
                     "admin" -> navController.navigate("admin_signup")

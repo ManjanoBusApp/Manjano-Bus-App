@@ -27,27 +27,42 @@ class MainActivity : FragmentActivity() {
         private val _pendingVerification = MutableStateFlow(false)
         val pendingVerification = _pendingVerification.asStateFlow()
 
-        // 🔥 NEW: Track if we should go to signup screen
+        // Track if we should go to signup screen
         private val _navigateToSignup = MutableStateFlow(false)
         val navigateToSignup = _navigateToSignup.asStateFlow()
+
+        // 🔥 NEW: Track if we should go to signin screen (for existing active accounts)
+        private val _navigateToSignin = MutableStateFlow(false)
+        val navigateToSignin = _navigateToSignin.asStateFlow()
 
         fun setVerificationEmail(email: String) {
             _verificationEmail.value = email
             _pendingVerification.value = true
-            _navigateToSignup.value = true  // 🔥 Trigger navigation to signup screen
+            _navigateToSignup.value = true
+            _navigateToSignin.value = false
             Log.d("🔥", "✅ Verification email set: $email")
+        }
+
+        // 🔥 NEW: Set navigation to signin screen for existing active accounts
+        fun setSigninNavigation(email: String? = null) {
+            _verificationEmail.value = email
+            _pendingVerification.value = false
+            _navigateToSignup.value = false
+            _navigateToSignin.value = true
+            Log.d("🔥", "✅ Signin navigation set for existing account: $email")
         }
 
         fun clearVerification() {
             _verificationEmail.value = null
             _pendingVerification.value = false
             _navigateToSignup.value = false
+            _navigateToSignin.value = false
         }
 
         fun hasPendingVerification(): Boolean = _pendingVerification.value
         fun shouldNavigateToSignup(): Boolean = _navigateToSignup.value
+        fun shouldNavigateToSignin(): Boolean = _navigateToSignin.value
     }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d("🔥", "🔧 MainActivity onCreate called")
@@ -81,6 +96,16 @@ class MainActivity : FragmentActivity() {
         Log.d("🔥", "🔧 Deep link received: $uri")
         Log.d("🔥", "🔧 Scheme: ${uri.scheme}")
         Log.d("🔥", "🔧 Host: ${uri.host}")
+
+        // 🔥 NEW: Check for manjanoapp://signin (for existing active accounts)
+        if (uri.scheme == "manjanoapp" && uri.host == "signin") {
+            Log.d("🔥", "✅ SIGNIN deep link received - navigating to signin screen")
+            // Get email if present
+            val email = uri.getQueryParameter("email")
+            // Set navigation to signin screen (not signup)
+            setSigninNavigation(email)
+            return
+        }
 
         // Check for manjanoapp://verification-success (SUCCESS - has email)
         if (uri.scheme == "manjanoapp" && uri.host == "verification-success") {

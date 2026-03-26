@@ -34,13 +34,14 @@ import com.manjano.bus.MainActivity
 @Composable
 fun AppNavGraph(
     navController: NavHostController,
-    startAtSignup: Boolean = false
+    startAtSignup: Boolean = false,
+    startAtSignin: Boolean = false
 ) {
     // Determine start destination
-    val startDestination = if (startAtSignup) {
-        "signup"
-    } else {
-        "welcome"
+    val startDestination = when {
+        startAtSignin -> "signin/parent"
+        startAtSignup -> "signup"
+        else -> "welcome"
     }
 
 

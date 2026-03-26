@@ -59,6 +59,11 @@
             margin: 20px 0;
         }
 
+        .success-icon {
+            font-size: 60px;
+            margin: 20px 0;
+        }
+
         .message {
             font-size: 16px;
             color: #333;
@@ -86,12 +91,6 @@
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
-        }
-
-        .success-icon {
-            font-size: 60px;
-            margin: 20px 0;
-            color: green;
         }
 
         .app-button {
@@ -144,16 +143,21 @@
     firebase.initializeApp(firebaseConfig);
     const functions = firebase.functions();
 
-    // Get token from URL
+    // Get token and email from URL
     const urlParams = new URLSearchParams(window.location.search);
     const token = urlParams.get('token');
+    const email = urlParams.get('email');
 
     const contentDiv = document.getElementById('content');
-    let userEmail = ""; // Store email for deep link
+    let userEmail = "";
 
     // Make functions globally available
     window.openAppWithEmail = function() {
         window.location.href = `manjanoapp://verification-success?email=${encodeURIComponent(userEmail)}`;
+    };
+
+    window.openAppForSignIn = function() {
+        window.location.href = `manjanoapp://signin?email=${encodeURIComponent(userEmail)}`;
     };
 
     window.openApp = function() {
@@ -161,30 +165,52 @@
     };
 
     async function verifyEmail() {
-        if (!token) {
+        // 🔥 Check if we have either token or email
+        if (!token && !email) {
             showError();
             return;
         }
 
         try {
             const verifyEmailFunction = functions.httpsCallable('verifyEmail');
-            const result = await verifyEmailFunction({ token: token });
+            // 🔥 CRITICAL: Pass both token AND email to the function
+            const result = await verifyEmailFunction({ token: token, email: email });
 
+            console.log("Verification result:", result);
+
+            // SUCCESS: First-time verification within 2 minutes
             if (result.data.success) {
                 userEmail = result.data.email;
                 showSuccess();
-            } else {
-                showError();
+                return;
             }
+
+            // ACCOUNT ACTIVE: User already signed up (email exists in parents collection)
+            if (result.data.error === "account_active" && result.data.email) {
+                userEmail = result.data.email;
+                showAccountActive();
+                return;
+            }
+
+            // EXPIRED: Link not clicked within 2 minutes
+            if (result.data.error === "expired") {
+                showExpired();
+                return;
+            }
+
+            // ANY OTHER ERROR: Shows Oops page
+            showError();
+
         } catch (error) {
             console.error('Verification error:', error);
             showError();
         }
     }
 
+    // ✓ Green success page (first-time verification within 2 minutes)
     function showSuccess() {
         contentDiv.innerHTML = `
-            <div class="success-icon">✓</div>
+            <div class="success-icon" style="color: green;">✓</div>
             <div class="message" style="color: green; font-weight: 500;">
                 Email verified successfully!
             </div>
@@ -192,24 +218,56 @@
             <button class="app-button" onclick="window.openAppWithEmail()">Return to App</button>
         `;
 
-        // Auto-open app after 2 seconds
         setTimeout(() => {
             window.openAppWithEmail();
         }, 2000);
     }
 
-    function showError() {
+    // 😊 Purple success page with smiling emoji (user already signed up)
+    function showAccountActive() {
+        contentDiv.innerHTML = `
+            <div class="success-icon" style="color: #800080;">😊</div>
+            <div class="message" style="color: black; font-weight: 500;">
+                Your account is already active. Taking you to sign in...
+            </div>
+            <div class="app-name">Manjano Bus App</div>
+            <button class="app-button" onclick="window.openAppForSignIn()">Return to App</button>
+        `;
+
+        setTimeout(() => {
+            window.openAppForSignIn();
+        }, 2000);
+    }
+
+    // 😢 Expired page (link not clicked within 2 minutes)
+    function showExpired() {
         contentDiv.innerHTML = `
             <div class="sad-emoji">😢</div>
             <div class="message">
-                Oops! This verification link is no longer working.<br>
-                Don't worry, just go back to the app and request a new link.
+                This verification link has expired.<br>
+                Please go back to the app and request a new link.
             </div>
             <div class="app-name">Manjano Bus App</div>
             <button class="app-button" onclick="window.openApp()">Return to App</button>
         `;
 
-        // Auto-open app after 3 seconds
+        setTimeout(() => {
+            window.openApp();
+        }, 3000);
+    }
+
+    // 😢 Oops page (any other error)
+    function showError() {
+        contentDiv.innerHTML = `
+            <div class="sad-emoji">😢</div>
+            <div class="message">
+                Oops! Something went wrong.<br>
+                Please go back to the app and request a new link.
+            </div>
+            <div class="app-name">Manjano Bus App</div>
+            <button class="app-button" onclick="window.openApp()">Return to App</button>
+        `;
+
         setTimeout(() => {
             window.openApp();
         }, 3000);

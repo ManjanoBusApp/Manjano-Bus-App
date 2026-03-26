@@ -85,22 +85,22 @@ exports.sendVerificationEmail = onCall(async (request) => {
     // Generate unique token
     const token = generateToken();
     const expiresAt = Date.now() + 2 * 60 * 1000; // 2 minutes from now
-    const expiresAtReadable = formatReadableDate(expiresAt); // Nice readable format
+    const expiresAtReadable = formatReadableDate(expiresAt);
 
     // Store token in Firestore with expiration
     const tokenData = {
         email: email,
         token: token,
         expiresAtReadable: expiresAtReadable,
-        expiresAtTimestamp: expiresAt, // Keep timestamp for cleanup
+        expiresAtTimestamp: expiresAt,
         used: false,
         createdAt: admin.firestore.FieldValue.serverTimestamp()
     };
 
     await admin.firestore().collection('verificationTokens').doc(token).set(tokenData);
 
-    // Create verification link with token
-    const webLink = `https://manjano-bus.web.app/verify.html?token=${token}`;
+    // 🔥 CRITICAL CHANGE: Include email in the verification link
+    const webLink = `https://manjano-bus.web.app/verify.html?token=${token}&email=${encodeURIComponent(email)}`;
 
     logger.info("Generated verification link for:", email);
     logger.info("Token expires at:", expiresAtReadable);
@@ -114,7 +114,7 @@ exports.sendVerificationEmail = onCall(async (request) => {
         html: `
             <div style="text-align: center; font-family: Arial, sans-serif;">
                 <h2>Verify Your Email Address</h2>
-                <p style="color: #666; margin-bottom: 20px;">This link will expire in <strong style="color: #800080;">30 minutes</strong></p>
+                <p style="color: #666; margin-bottom: 20px;">This link will expire in <strong style="color: #800080;">2 minutes</strong></p>
                 <a href="${webLink}" style="
                     background-color:#800080;
                     color:white;
@@ -140,7 +140,7 @@ exports.sendVerificationEmail = onCall(async (request) => {
         text: `
 Verify Your Email Address - Manjano Bus App
 
-This link will expire in 30 minutes.
+This link will expire in 2 minutes.
 
 Click the link below to verify your email:
 
@@ -162,16 +162,73 @@ If you didn't request this, please ignore this email.
 
 // ==================== FUNCTION 3: VERIFY EMAIL TOKEN ====================
 exports.verifyEmail = onCall(async (request) => {
-    const { token } = request.data;
+    const { token, email } = request.data;
 
-    if (!token) {
-        throw new Error("No verification token provided");
+    logger.info("=== VERIFY EMAIL CALLED ===");
+    logger.info("Token received:", token);
+    logger.info("Email received from URL:", email);
+
+    if (!token && !email) {
+        logger.error("No token or email provided");
+        throw new Error("No verification token or email provided");
     }
 
-    // Get token from Firestore
+    let userEmail = email;
+
+    // 🔥 If email was not in the URL, try to get it from the token document
+    if (!userEmail && token) {
+        logger.info("Email not in URL, checking token document...");
+        const tokenDoc = await admin.firestore().collection('verificationTokens').doc(token).get();
+        if (tokenDoc.exists) {
+            userEmail = tokenDoc.data().email;
+            logger.info("Email found from token document:", userEmail);
+        }
+    }
+
+    if (!userEmail) {
+        logger.error("Could not determine email");
+        return {
+            success: false,
+            error: "no_email",
+            message: "Unable to verify. Please request a new link."
+        };
+    }
+
+    // 🔥 STEP 1: ALWAYS check if user already exists in parents collection FIRST
+    // This runs regardless of whether token exists or not
+    logger.info("Checking if email exists in parents collection...");
+    const parentsRef = admin.firestore().collection('parents');
+    const parentQuery = await parentsRef.where('email', '==', userEmail).get();
+
+    logger.info("Parents query result size:", parentQuery.size);
+
+    if (!parentQuery.empty) {
+        // User already has an active account
+        logger.info("✅ Email found in parents collection. Returning account_active");
+        return {
+            success: false,
+            error: "account_active",
+            email: userEmail,
+            message: "Your account is already active. Taking you to sign in..."
+        };
+    }
+
+    logger.info("Email NOT found in parents collection. User is new.");
+
+    // 🔥 STEP 2: User is new - now validate the token
+    if (!token) {
+        logger.error("No token provided for new user");
+        return {
+            success: false,
+            error: "invalid",
+            message: "Invalid verification link. Please request a new one."
+        };
+    }
+
     const tokenDoc = await admin.firestore().collection('verificationTokens').doc(token).get();
 
     if (!tokenDoc.exists) {
+        logger.error("Token does not exist in Firestore");
         return {
             success: false,
             error: "invalid",
@@ -181,20 +238,22 @@ exports.verifyEmail = onCall(async (request) => {
 
     const tokenData = tokenDoc.data();
 
-    // Check if already used
-    if (tokenData.used) {
+    // Verify the email in token matches the email from URL
+    if (tokenData.email !== userEmail) {
+        logger.error("Email mismatch between token and URL");
         return {
             success: false,
-            error: "used",
-            message: "This link has already been used. Please request a new verification email."
+            error: "mismatch",
+            message: "Verification link does not match email. Please request a new one."
         };
     }
 
-    // Check if expired using timestamp
+    // Check if expired
     const now = Date.now();
     const expiryTimestamp = tokenData.expiresAtTimestamp;
 
     if (now > expiryTimestamp) {
+        logger.info("Token expired. Returning expired error");
         await admin.firestore().collection('verificationTokens').doc(token).delete();
         return {
             success: false,
@@ -203,7 +262,18 @@ exports.verifyEmail = onCall(async (request) => {
         };
     }
 
+    // Check if already used
+    if (tokenData.used) {
+        logger.info("Token already used. Returning used error");
+        return {
+            success: false,
+            error: "used",
+            message: "This link has already been used. Please request a new verification email."
+        };
+    }
+
     // Mark token as used
+    logger.info("Token valid. Marking as used and completing verification...");
     await admin.firestore().collection('verificationTokens').doc(token).update({
         used: true,
         verifiedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -211,30 +281,29 @@ exports.verifyEmail = onCall(async (request) => {
 
     // Update user's email verification status in users collection
     const usersRef = admin.firestore().collection('users');
-    const userDoc = await usersRef.doc(tokenData.email).get();
+    const userDoc = await usersRef.doc(userEmail).get();
 
     if (userDoc.exists) {
-        await usersRef.doc(tokenData.email).update({
+        await usersRef.doc(userEmail).update({
             emailVerified: true,
             verifiedAt: admin.firestore.FieldValue.serverTimestamp()
         });
     }
 
+    logger.info("Verification completed successfully");
     return {
         success: true,
-        email: tokenData.email,
+        email: userEmail,
         message: "Email verified successfully!"
     };
 });
 
 // ==================== FUNCTION 4: CLEAN UP EXPIRED TOKENS ====================
-// Runs every hour and deletes tokens that have expired
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 
 exports.cleanupExpiredTokens = onSchedule("every 60 minutes", async (event) => {
     const now = Date.now();
 
-    // Get all tokens that have expired using timestamp field
     const expiredTokens = await admin.firestore()
         .collection('verificationTokens')
         .where('expiresAtTimestamp', '<', now)
@@ -245,7 +314,6 @@ exports.cleanupExpiredTokens = onSchedule("every 60 minutes", async (event) => {
         return;
     }
 
-    // Delete all expired tokens in a batch
     const batch = admin.firestore().batch();
     expiredTokens.docs.forEach(doc => {
         batch.delete(doc.ref);
@@ -260,19 +328,16 @@ exports.testReportNow = onCall(async (request) => {
     const adminEmail = "reneegithinji@yahoo.com";
 
     try {
-        // Get verified parents
         const parentsSnapshot = await admin.firestore()
             .collection('parents')
             .where('emailVerified', '==', true)
             .get();
 
-        // Get verified drivers
         const driversSnapshot = await admin.firestore()
             .collection('drivers')
             .where('emailVerified', '==', true)
             .get();
 
-        // Build email content
         let parentsList = "";
         parentsSnapshot.forEach(doc => {
             const data = doc.data();
@@ -285,7 +350,6 @@ exports.testReportNow = onCall(async (request) => {
             driversList += `${data.name || "Unknown"} | ${data.email || "No email"} | ${data.mobileNumber || "No phone"} | ${data.schoolName || "No school"}\n`;
         });
 
-        // Send email
         await transporter.sendMail({
             from: "Manjano Bus App <reneegithinji@yahoo.com>",
             to: adminEmail,

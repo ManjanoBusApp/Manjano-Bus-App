@@ -1398,6 +1398,10 @@ fun SignupScreen(
                         )
                         val encodedStatus =
                             URLEncoder.encode("On Route", StandardCharsets.UTF_8.toString())
+
+                        // 🔥 Clear verification data so signup form is fresh next time
+                        MainActivity.clearVerification()
+
                         navController.navigate("parent_dashboard/$encodedParent/$encodedChildren/$encodedStatus") {
                             popUpTo("signup") { inclusive = true }
                         }
