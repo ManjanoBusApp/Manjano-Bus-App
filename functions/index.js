@@ -21,16 +21,18 @@ function generateToken() {
 
 // Helper function to format readable date
 function formatReadableDate(timestamp) {
-    const date = new Date(timestamp);
-    const hours = date.getHours();
-    const minutes = date.getMinutes();
+    // Add 3 hours for Kenya time (UTC+3)
+    const kenyaTimestamp = timestamp + (3 * 60 * 60 * 1000);
+    const date = new Date(kenyaTimestamp);
+    const hours = date.getUTCHours();
+    const minutes = date.getUTCMinutes();
     const ampm = hours >= 12 ? 'PM' : 'AM';
     const hour12 = hours % 12 || 12;
     const minuteStr = minutes < 10 ? '0' + minutes : minutes;
 
-    const day = date.getDate();
-    const month = date.toLocaleString('default', { month: 'long' });
-    const year = date.getFullYear();
+    const day = date.getUTCDate();
+    const month = date.toLocaleString('default', { month: 'long', timeZone: 'UTC' });
+    const year = date.getUTCFullYear();
 
     return `${hour12}:${minuteStr} ${ampm} on ${day} ${month} ${year}`;
 }
@@ -87,17 +89,22 @@ exports.sendVerificationEmail = onCall(async (request) => {
     const expiresAt = Date.now() + 2 * 60 * 1000; // 2 minutes from now
     const expiresAtReadable = formatReadableDate(expiresAt);
 
-    // Store token in Firestore with expiration
-    const tokenData = {
-        email: email,
-        token: token,
-        expiresAtReadable: expiresAtReadable,
-        expiresAtTimestamp: expiresAt,
-        used: false,
-        createdAt: admin.firestore.FieldValue.serverTimestamp()
-    };
+       // Store token in Firestore with expiration
+       // Use email as document ID
+       const sanitizedEmail = email.replace(/\./g, '_');
 
-    await admin.firestore().collection('verificationTokens').doc(token).set(tokenData);
+       const tokenData = {
+           email: email,
+           token: token,
+           expiresAtReadable: expiresAtReadable,
+           expiresAtTimestamp: expiresAt,
+           used: false,
+           createdAt: admin.firestore.FieldValue.serverTimestamp()
+       };
+
+           // Store using sanitized email as document ID
+           logger.info("Storing token with document ID (sanitized email):", sanitizedEmail);
+           await admin.firestore().collection('verificationTokens').doc(sanitizedEmail).set(tokenData);
 
     // 🔥 CRITICAL CHANGE: Include email in the verification link
     const webLink = `https://manjano-bus.web.app/verify.html?token=${token}&email=${encodeURIComponent(email)}`;
@@ -164,35 +171,38 @@ If you didn't request this, please ignore this email.
 exports.verifyEmail = onCall(async (request) => {
     const { token, email } = request.data;
 
-    logger.info("=== VERIFY EMAIL CALLED ===");
-    logger.info("Token received:", token);
-    logger.info("Email received from URL:", email);
+        logger.info("=== VERIFY EMAIL CALLED ===");
+        logger.info("Token received:", token);
+        logger.info("Email received from URL:", email);
 
-    if (!token && !email) {
-        logger.error("No token or email provided");
-        throw new Error("No verification token or email provided");
-    }
-
-    let userEmail = email;
-
-    // 🔥 If email was not in the URL, try to get it from the token document
-    if (!userEmail && token) {
-        logger.info("Email not in URL, checking token document...");
-        const tokenDoc = await admin.firestore().collection('verificationTokens').doc(token).get();
-        if (tokenDoc.exists) {
-            userEmail = tokenDoc.data().email;
-            logger.info("Email found from token document:", userEmail);
+        if (!token && !email) {
+            logger.error("No token or email provided");
+            throw new Error("No verification token or email provided");
         }
-    }
 
-    if (!userEmail) {
-        logger.error("Could not determine email");
-        return {
-            success: false,
-            error: "no_email",
-            message: "Unable to verify. Please request a new link."
-        };
-    }
+        let userEmail = email;
+        logger.info("userEmail variable after assignment:", userEmail);
+
+        // 🔥 If email was not in the URL, try to get it from the token document
+        if (!userEmail && token) {
+            logger.info("Email not in URL, checking token document...");
+            const tokenDoc = await admin.firestore().collection('verificationTokens').doc(token).get();
+            if (tokenDoc.exists) {
+                userEmail = tokenDoc.data().email;
+                logger.info("Email found from token document:", userEmail);
+            }
+        }
+
+        if (!userEmail) {
+            logger.error("Could not determine email");
+            return {
+                success: false,
+                error: "no_email",
+                message: "Unable to verify. Please request a new link."
+            };
+        }
+
+        logger.info("Final userEmail being used for parents check:", userEmail);
 
     // 🔥 STEP 1: ALWAYS check if user already exists in parents collection FIRST
     // This runs regardless of whether token exists or not
@@ -215,26 +225,30 @@ exports.verifyEmail = onCall(async (request) => {
 
     logger.info("Email NOT found in parents collection. User is new.");
 
-    // 🔥 STEP 2: User is new - now validate the token
-    if (!token) {
-        logger.error("No token provided for new user");
-        return {
-            success: false,
-            error: "invalid",
-            message: "Invalid verification link. Please request a new one."
-        };
-    }
+        // 🔥 STEP 2: User is new - now validate the token
+        if (!token) {
+            logger.error("No token provided for new user");
+            return {
+                success: false,
+                error: "invalid",
+                message: "Invalid verification link. Please request a new one."
+            };
+        }
 
-    const tokenDoc = await admin.firestore().collection('verificationTokens').doc(token).get();
+        // Sanitize email to match document ID
+        const sanitizedEmail = userEmail.replace(/\./g, '_');
+        logger.info("Looking up token document with sanitized email:", sanitizedEmail);
+        const tokenDoc = await admin.firestore().collection('verificationTokens').doc(sanitizedEmail).get();
+        logger.info("Token document exists?", tokenDoc.exists);
 
-    if (!tokenDoc.exists) {
-        logger.error("Token does not exist in Firestore");
-        return {
-            success: false,
-            error: "invalid",
-            message: "Invalid verification link. Please request a new one."
-        };
-    }
+        if (!tokenDoc.exists) {
+            logger.error("Token does not exist in Firestore");
+            return {
+                success: false,
+                error: "invalid",
+                message: "Invalid verification link. Please request a new one."
+            };
+        }
 
     const tokenData = tokenDoc.data();
 
@@ -252,15 +266,17 @@ exports.verifyEmail = onCall(async (request) => {
     const now = Date.now();
     const expiryTimestamp = tokenData.expiresAtTimestamp;
 
-    if (now > expiryTimestamp) {
-        logger.info("Token expired. Returning expired error");
-        await admin.firestore().collection('verificationTokens').doc(token).delete();
-        return {
-            success: false,
-            error: "expired",
-            message: "Link expired, please go back to the app and request for another link."
-        };
-    }
+       if (now > expiryTimestamp) {
+           logger.info("Token expired. Returning expired error");
+           // Use sanitized email to delete the document
+           const sanitizedEmailForDelete = userEmail.replace(/\./g, '_');
+           await admin.firestore().collection('verificationTokens').doc(sanitizedEmailForDelete).delete();
+           return {
+               success: false,
+               error: "expired",
+               message: "Link expired, please go back to the app and request for another link."
+           };
+       }
 
     // Check if already used
     if (tokenData.used) {
@@ -272,12 +288,14 @@ exports.verifyEmail = onCall(async (request) => {
         };
     }
 
-    // Mark token as used
-    logger.info("Token valid. Marking as used and completing verification...");
-    await admin.firestore().collection('verificationTokens').doc(token).update({
-        used: true,
-        verifiedAt: admin.firestore.FieldValue.serverTimestamp()
-    });
+       // Mark token as used
+       logger.info("Token valid. Marking as used and completing verification...");
+       // Use the sanitized email as the document ID (where the token actually lives)
+       const sanitizedEmailForUpdate = userEmail.replace(/\./g, '_');
+       await admin.firestore().collection('verificationTokens').doc(sanitizedEmailForUpdate).update({
+           used: true,
+           verifiedAt: admin.firestore.FieldValue.serverTimestamp()
+       });
 
     // Update user's email verification status in users collection
     const usersRef = admin.firestore().collection('users');
