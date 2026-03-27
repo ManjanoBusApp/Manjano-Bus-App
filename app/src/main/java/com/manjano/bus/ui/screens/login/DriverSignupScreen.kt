@@ -573,12 +573,17 @@ fun DriverSignupScreen(
 
                     when {
                         alreadyRegistered.isNullOrBlank() && isPhoneAllowed == true -> {
+                            // Format driver name and school name for document ID
+                            val formattedDriverId = "${driverName.text.trim()} - ${schoolName.text.trim()}"
+
+
                             signupViewModel.saveDriverProfileIfNeeded(
                                 phoneNumber = phoneNumber,
                                 fullName = driverName.text,
                                 nationalId = idNumber.text,
                                 schoolName = schoolName.text,
-                                countryIso = selectedCountry.isoCode
+                                countryIso = selectedCountry.isoCode,
+                                documentId = formattedDriverId  // 🔥 Pass the formatted ID
                             )
 
                             val encodedDriverName =
@@ -586,6 +591,8 @@ fun DriverSignupScreen(
 
                             val safeDriverName =
                                 java.net.URLEncoder.encode(driverName.text, "UTF-8")
+
+                            // Use the formatted ID for navigation (or keep using phone number)
                             runCatching {
                                 navController.navigate("driver_dashboard/$phoneNumber/$safeDriverName") {
                                     popUpTo("driver_signup") { inclusive = true }

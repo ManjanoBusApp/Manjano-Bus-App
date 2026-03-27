@@ -387,66 +387,139 @@ class SignUpViewModel : ViewModel() {
         fullName: String,
         nationalId: String,
         schoolName: String,
-        countryIso: String
+        countryIso: String,
+        documentId: String? = null
     ) {
         val normalizedPhone = normalizePhoneNumber(phoneNumber, countryIso)
 
+        val newDocId = documentId ?: normalizedPhone
+
+        Log.d("🔥", "=== SAVE DRIVER PROFILE ===")
+        Log.d("🔥", "Raw phone number: $phoneNumber")
+        Log.d("🔥", "Normalized phone: $normalizedPhone")
+        Log.d("🔥", "New document ID: $newDocId")
+
+        val now = java.util.Calendar.getInstance().time
+        val dateFormatter = java.text.SimpleDateFormat(
+            "dd MMMM yyyy",
+            java.util.Locale.getDefault()
+        )
+        val timeFormatter =
+            java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
+        val createdAtDate = dateFormatter.format(now)
+        val createdAtTime = timeFormatter.format(now)
+
+        val driverData = mapOf(
+            "name" to fullName,
+            "idNumber" to nationalId,
+            "schoolName" to schoolName,
+            "mobileNumber" to normalizedPhone,
+            "createdOn" to createdAtDate,
+            "createdTime" to createdAtTime
+        )
+
+        // Step 1: Find the old document by phone number
         firestore.collection("drivers")
+            .whereEqualTo("mobileNumber", normalizedPhone)
+            .limit(1)
             .get()
             .addOnSuccessListener { snapshot ->
+                Log.d("🔥", "Query result size: ${snapshot.size()}")
 
-                val matchingDoc = snapshot.documents.firstOrNull { doc ->
-                    val dbNumber = doc.getString("mobileNumber")?.filter { it.isDigit() } ?: ""
-                    val inputNumber = normalizedPhone.filter { it.isDigit() }
-                    dbNumber == inputNumber
+                snapshot.documents.forEach { doc ->
+                    Log.d("🔥", "Found document - ID: ${doc.id}, Data: ${doc.data}")
                 }
 
-                if (matchingDoc != null) {
+                val oldDoc = snapshot.documents.firstOrNull()
 
-                    val existingName = matchingDoc.getString("name")
+                if (oldDoc != null) {
+                    val oldDocId = oldDoc.id
+                    Log.d("🔥", "Found old document with ID: $oldDocId")
 
-                    // Only write if the profile was not filled before
-                    if (existingName.isNullOrBlank()) {
+                    // Step 2: Create new document with formatted ID
+                    firestore.collection("drivers")
+                        .document(newDocId)
+                        .set(driverData)
+                        .addOnSuccessListener {
+                            Log.d("🔥", "✅ New driver profile created with ID: $newDocId")
 
-                        val now = java.util.Calendar.getInstance().time
-                        val dateFormatter = java.text.SimpleDateFormat(
-                            "dd MMMM yyyy",
-                            java.util.Locale.getDefault()
-                        )
-                        val timeFormatter =
-                            java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
-                        val createdAtDate = dateFormatter.format(now)
-                        val createdAtTime = timeFormatter.format(now)
-
-                        firestore.collection("drivers")
-                            .document(matchingDoc.id)
-                            .update(
-                                mapOf(
-                                    "name" to fullName,
-                                    "idNumber" to nationalId,
-                                    "schoolName" to schoolName,
-                                    "createdOn" to createdAtDate,
-                                    "createdTime" to createdAtTime
-                                )
-                            )
-                            .addOnSuccessListener {
-                                Log.d("🔥", "Driver profile saved successfully")
-                            }
-                            .addOnFailureListener { e ->
-                                Log.e("🔥", "Failed to save driver profile", e)
-                            }
-
-                    } else {
-                        Log.d("🔥", "Driver profile already exists, skipping write")
-                    }
-
+                            // Step 3: Delete the old document
+                            firestore.collection("drivers")
+                                .document(oldDocId)
+                                .delete()
+                                .addOnSuccessListener {
+                                    Log.d("🔥", "✅ Old driver document deleted: $oldDocId")
+                                }
+                                .addOnFailureListener { e ->
+                                    Log.e("🔥", "❌ Failed to delete old document: $oldDocId", e)
+                                }
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e("🔥", "❌ Failed to create new driver profile", e)
+                        }
                 } else {
-                    Log.e("🔥", "No matching driver document found for phone")
-                }
+                    Log.d("🔥", "No existing document found with mobileNumber: $normalizedPhone")
+                    Log.d("🔥", "Trying to find by document ID (phone number format)...")
 
+                    // Alternative: try to find by document ID (admin might have used document ID as phone number)
+                    firestore.collection("drivers")
+                        .document(normalizedPhone)
+                        .get()
+                        .addOnSuccessListener { docByDocId ->
+                            if (docByDocId.exists()) {
+                                val oldDocId = docByDocId.id
+                                Log.d("🔥", "Found document by document ID: $oldDocId")
+                                Log.d("🔥", "Document data: ${docByDocId.data}")
+
+                                // Create new document with formatted ID
+                                firestore.collection("drivers")
+                                    .document(newDocId)
+                                    .set(driverData)
+                                    .addOnSuccessListener {
+                                        Log.d("🔥", "✅ New driver profile created with ID: $newDocId")
+
+                                        // Delete the old document
+                                        firestore.collection("drivers")
+                                            .document(oldDocId)
+                                            .delete()
+                                            .addOnSuccessListener {
+                                                Log.d("🔥", "✅ Old driver document deleted: $oldDocId")
+                                            }
+                                            .addOnFailureListener { e ->
+                                                Log.e("🔥", "❌ Failed to delete old document: $oldDocId", e)
+                                            }
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Log.e("🔥", "❌ Failed to create new driver profile", e)
+                                    }
+                            } else {
+                                Log.d("🔥", "No existing document found. Creating new one.")
+                                // Create new document with formatted ID
+                                firestore.collection("drivers")
+                                    .document(newDocId)
+                                    .set(driverData)
+                                    .addOnSuccessListener {
+                                        Log.d("🔥", "✅ New driver profile created with ID: $newDocId")
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Log.e("🔥", "❌ Failed to create driver profile", e)
+                                    }
+                            }
+                        }
+                }
             }
             .addOnFailureListener { e ->
-                Log.e("🔥", "Firestore query failed", e)
+                Log.e("🔥", "❌ Failed to query for existing driver", e)
+                // Fallback: try to create with formatted ID anyway
+                firestore.collection("drivers")
+                    .document(newDocId)
+                    .set(driverData)
+                    .addOnSuccessListener {
+                        Log.d("🔥", "✅ Driver profile created (fallback) with ID: $newDocId")
+                    }
+                    .addOnFailureListener { err ->
+                        Log.e("🔥", "❌ Failed to create driver profile (fallback)", err)
+                    }
             }
     }
 
