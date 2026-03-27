@@ -1366,12 +1366,68 @@ fun SignupScreen(
                             .addOnSuccessListener {
                                 Log.d("🔥", "Parent extra fields merged in Firestore")
 
-                                // 🔥 CREATE USER DOCUMENT IN USERS COLLECTION
-                                signupViewModel.createUserDocument(
-                                    email = email.text.trim(),
-                                    name = parentName.text.trim(),
-                                    role = "parent"
-                                )
+
+                                // 🔥 SAVE TO CHILDREN COLLECTION IN FIRESTORE
+                                firestore.collection("parents")
+                                    .document(normalizedPhone)
+                                    .get()
+                                    .addOnSuccessListener { parentDoc ->
+                                        val schoolName = parentDoc.getString("school") ?: ""
+
+                                        val childData = mutableMapOf<String, Any>(
+                                            "parentName" to parentName.text.trim(),
+                                            "schoolName" to schoolName,
+                                            "createdOn" to createdOn,
+                                            "createdAt" to createdTime
+                                        )
+
+                                        childrenNames.forEachIndexed { index, childField ->
+                                            childData["childName${index + 1}"] = childField.text.trim()
+                                        }
+
+                                        if (childrenNames.size == 1) {
+                                            childData["childName"] = childrenNames[0].text.trim()
+                                        }
+
+                                        // Format child name(s) for document ID
+                                        fun formatChildName(fullName: String): String {
+                                            val parts = fullName.trim().split(" ")
+                                            return when (parts.size) {
+                                                1 -> parts[0] // Only first name
+                                                2 -> "${parts[0]} ${parts[1].first()}" // First name + last initial
+                                                else -> {
+                                                    val firstName = parts[0]
+                                                    val middleInitial = parts[1].first()
+                                                    val lastInitial = parts.last().first()
+                                                    "$firstName $middleInitial.$lastInitial"
+                                                }
+                                            }
+                                        }
+
+                                        val childId = if (childrenNames.size == 1) {
+                                            formatChildName(childrenNames[0].text.trim())
+                                        } else {
+                                            childrenNames.joinToString(" - ") { formatChildName(it.text.trim()) }
+                                        }
+
+                                        // Add parent phone number to ensure uniqueness
+                                        // Get last 3 digits of phone number
+                                        val lastThreeDigits = normalizedPhone.takeLast(3)
+                                        val childDocId = "$childId-$lastThreeDigits"
+
+                                        firestore.collection("children")
+                                            .document(childDocId)
+                                            .set(childData)
+                                            .addOnSuccessListener {
+                                                Log.d("🔥", "Child document created successfully in Firestore: $childDocId")
+                                            }
+                                            .addOnFailureListener { e ->
+                                                Log.e("🔥", "Failed to create child document in Firestore", e)
+                                            }
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Log.e("🔥", "Failed to get parent document for school name", e)
+                                    }
                             }
                             .addOnFailureListener { e ->
                                 Log.e("🔥", "Failed to merge parent fields", e)

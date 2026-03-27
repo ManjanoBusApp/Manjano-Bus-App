@@ -97,25 +97,6 @@ class SignUpViewModel : ViewModel() {
         }
     }
 
-    fun createUserDocument(email: String, name: String, role: String) {
-        val functions = FirebaseFunctions.getInstance()
-        val createUser = functions.getHttpsCallable("createUserDocument")
-
-        val data = hashMapOf(
-            "email" to email,
-            "name" to name,
-            "role" to role,
-            "userId" to ""
-        )
-
-        createUser.call(data)
-            .addOnSuccessListener { result ->
-                Log.d("SignUp", "User document created successfully for: $email")
-            }
-            .addOnFailureListener { e ->
-                Log.e("SignUp", "Error creating user document: ${e.message}", e)
-            }
-    }
 
     private val resendDuration = 30 // seconds
 
@@ -494,10 +475,7 @@ class SignUpViewModel : ViewModel() {
     }
 
     fun saveUserNames(parentName: String, childrenNames: String, email: String, context: Context) {
-        Log.d("🔥", "Signup complete. Creating user document...")
-
-        // Create user document in Firestore
-        createUserDocument(email, parentName, "parent")
+        Log.d("🔥", "Signup complete.")
 
         _uiState.value = _uiState.value.copy(navigateToDashboard = true)
     }
