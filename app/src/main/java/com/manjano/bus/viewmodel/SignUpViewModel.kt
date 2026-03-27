@@ -415,7 +415,8 @@ class SignUpViewModel : ViewModel() {
             "schoolName" to schoolName,
             "mobileNumber" to normalizedPhone,
             "createdOn" to createdAtDate,
-            "createdTime" to createdAtTime
+            "createdTime" to createdAtTime,
+            "active" to true
         )
 
         // Step 1: Find the old document by phone number

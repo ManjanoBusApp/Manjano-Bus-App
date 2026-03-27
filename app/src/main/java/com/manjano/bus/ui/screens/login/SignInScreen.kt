@@ -90,7 +90,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 import androidx.compose.ui.focus.onFocusChanged
-
+import android.util.Log
 
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -129,6 +129,20 @@ fun SignInScreen(
         if (uiState.navigateToDashboard) {
 
             runCatching {
+
+                // 🔥 SAVE USER SESSION
+                val rawPhone = uiState.rawPhoneInput
+                val countryIso = uiState.selectedCountry.isoCode
+                val normalizedPhone = viewModel.normalizePhoneNumber(rawPhone, countryIso)
+
+                val sessionPrefs = context.getSharedPreferences("user_session", Context.MODE_PRIVATE)
+                sessionPrefs.edit().apply {
+                    putString("user_role", role)
+                    putString("user_phone", normalizedPhone)
+                    putBoolean("is_signed_in", true)
+                    apply()
+                }
+                Log.d("🔥", "User session saved: role=$role, phone=$normalizedPhone")
 
                 if (role == "driver") {
                     val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()

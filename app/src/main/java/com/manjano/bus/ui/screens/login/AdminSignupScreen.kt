@@ -51,6 +51,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import android.content.Context
+import android.util.Log
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -99,6 +102,8 @@ fun AdminSignupScreen(
     val schoolFocusRequester = remember { FocusRequester() }
     val positionFocusRequester = remember { FocusRequester() }
     val phoneFocusRequester = remember { FocusRequester() }
+    val context = androidx.compose.ui.platform.LocalContext.current
+
 
     Column(
         modifier = Modifier
@@ -526,6 +531,46 @@ fun AdminSignupScreen(
                 }
                 // All navigation safety checks are already handled reactively by isContinueEnabled
                 if (isContinueEnabled) {
+                    // 🔥 SAVE ADMIN PROFILE TO FIRESTORE
+                    val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                    val now = java.util.Calendar.getInstance().time
+                    val dateFormatter = java.text.SimpleDateFormat("dd MMMM yyyy", java.util.Locale.getDefault())
+                    val timeFormatter = java.text.SimpleDateFormat("hh:mm a", java.util.Locale.getDefault())
+                    val createdOn = dateFormatter.format(now)
+                    val createdTime = timeFormatter.format(now)
+
+                    val adminData = mapOf(
+                        "name" to adminName.text.trim(),
+                        "idNumber" to idNumber.text.trim(),
+                        "schoolName" to schoolName.text.trim(),
+                        "position" to currentPosition.text.trim(),
+                        "mobileNumber" to normalizedPhone,
+                        "role" to "admin",
+                        "createdOn" to createdOn,
+                        "createdTime" to createdTime,
+                        "active" to true  // 🔥 All new admins are active by default
+                    )
+
+                    // Use phone number as document ID
+                    db.collection("admins")
+                        .document(normalizedPhone)
+                        .set(adminData)
+                        .addOnSuccessListener {
+                            Log.d("🔥", "Admin profile saved successfully")
+                        }
+                        .addOnFailureListener { e ->
+                            Log.e("🔥", "Failed to save admin profile", e)
+                        }
+
+                    // Save session for foreground check
+                    val sessionPrefs = context.getSharedPreferences("user_session", Context.MODE_PRIVATE)
+                    sessionPrefs.edit().apply {
+                        putString("user_role", "admin")
+                        putString("user_phone", normalizedPhone)
+                        putBoolean("is_signed_in", true)
+                        apply()
+                    }
+
                     navController.navigate("admin_dashboard") {
                         popUpTo("admin_signup") { inclusive = true }
                     }
@@ -542,7 +587,6 @@ fun AdminSignupScreen(
         ) {
             Text("Continue", color = Color.White, fontSize = 16.sp)
         }
-
         Spacer(modifier = Modifier.height(12.dp))
 
         Row(

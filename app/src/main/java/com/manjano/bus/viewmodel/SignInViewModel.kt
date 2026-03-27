@@ -115,6 +115,23 @@ class SignInViewModel : ViewModel() {
                 if (matchingDoc != null) {
                     _isPreRegistered.value = true
 
+                    // 🔥 NEW: Check if account is active
+                    val isActive = matchingDoc.getBoolean("active") ?: true  // Default to true if field doesn't exist
+
+                    if (!isActive) {
+                        Log.d("SignInCheck", "Account is disabled for: $normalizedInput")
+                        _isPhoneAllowed.value = false
+                        _isPreRegistered.value = false
+                        _isSignedUp.value = false
+                        // Show disabled account message
+                        _uiState.value = _uiState.value.copy(
+                            showError = true,
+                            phoneValidationMessage = "Your account has been deactivated. Please contact the school.",
+                            isPhoneValidationVisible = true
+                        )
+                        return@addOnSuccessListener
+                    }
+
                     // Check if profile is completed (signed up)
                     val nameField = if (collectionName == "drivers") "name" else "parentName"
                     val hasName = !matchingDoc.getString(nameField).isNullOrBlank()
@@ -127,7 +144,7 @@ class SignInViewModel : ViewModel() {
 
                     Log.d(
                         "SignInCheck",
-                        "$collectionName match found - pre-registered: true, signed-up: ${_isSignedUp.value}"
+                        "$collectionName match found - pre-registered: true, signed-up: ${_isSignedUp.value}, active: $isActive"
                     )
                 } else {
                     _isPreRegistered.value = false

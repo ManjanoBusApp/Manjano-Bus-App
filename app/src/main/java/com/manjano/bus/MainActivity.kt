@@ -1,21 +1,18 @@
 package com.manjano.bus
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.util.Log
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.fragment.app.FragmentActivity
 import com.manjano.bus.ui.ManjanoAppUI
 import com.manjano.bus.ui.theme.ManjanoTheme
-import android.util.Log
 import dagger.hilt.android.AndroidEntryPoint
-import androidx.fragment.app.FragmentActivity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import android.content.Context
-
-
 
 @AndroidEntryPoint
 class MainActivity : FragmentActivity() {
@@ -27,11 +24,9 @@ class MainActivity : FragmentActivity() {
         private val _pendingVerification = MutableStateFlow(false)
         val pendingVerification = _pendingVerification.asStateFlow()
 
-        // Track if we should go to signup screen
         private val _navigateToSignup = MutableStateFlow(false)
         val navigateToSignup = _navigateToSignup.asStateFlow()
 
-        // 🔥 NEW: Track if we should go to signin screen (for existing active accounts)
         private val _navigateToSignin = MutableStateFlow(false)
         val navigateToSignin = _navigateToSignin.asStateFlow()
 
@@ -43,7 +38,6 @@ class MainActivity : FragmentActivity() {
             Log.d("🔥", "✅ Verification email set: $email")
         }
 
-        // 🔥 NEW: Set navigation to signin screen for existing active accounts
         fun setSigninNavigation(email: String? = null) {
             _verificationEmail.value = email
             _pendingVerification.value = false
@@ -63,6 +57,51 @@ class MainActivity : FragmentActivity() {
         fun shouldNavigateToSignup(): Boolean = _navigateToSignup.value
         fun shouldNavigateToSignin(): Boolean = _navigateToSignin.value
     }
+
+    private fun checkUserActiveStatus() {
+        val prefs = getSharedPreferences("user_session", Context.MODE_PRIVATE)
+        val userRole = prefs.getString("user_role", null)
+        val userPhone = prefs.getString("user_phone", null)
+
+        Log.d("🔥", "checkUserActiveStatus - role: $userRole, phone: $userPhone")
+
+        if (userRole != null && userPhone != null) {
+            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+            val collectionName = if (userRole == "driver") "drivers" else "parents"
+
+            Log.d("🔥", "Querying $collectionName for mobileNumber: $userPhone")
+
+            db.collection(collectionName)
+                .whereEqualTo("mobileNumber", userPhone)
+                .limit(1)
+                .get()
+                .addOnSuccessListener { documents ->
+                    Log.d("🔥", "Found ${documents.size()} documents")
+                    val doc = documents.documents.firstOrNull()
+                    if (doc != null) {
+                        val isActive = doc.getBoolean("active") ?: true
+                        Log.d("🔥", "Document found, active: $isActive")
+                        if (!isActive) {
+                            Log.d("🔥", "User deactivated - signing out")
+                            prefs.edit().clear().apply()
+                            clearVerification()
+                            val intent = Intent(this, MainActivity::class.java)
+                            intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                            startActivity(intent)
+                            finish()
+                        }
+                    } else {
+                        Log.d("🔥", "No document found for phone: $userPhone")
+                    }
+                }
+                .addOnFailureListener { e ->
+                    Log.e("🔥", "Failed to check user active status", e)
+                }
+        } else {
+            Log.d("🔥", "No active session found")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         Log.d("🔥", "🔧 MainActivity onCreate called")
@@ -76,17 +115,21 @@ class MainActivity : FragmentActivity() {
         setContent {
             ManjanoTheme {
                 ManjanoAppUI(
-                    startAtSignup = shouldNavigateToSignup()  // 🔥 Pass this to your navigation
+                    startAtSignup = shouldNavigateToSignup()
                 )
             }
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        Log.d("🔥", "App resumed - checking user status")
+        checkUserActiveStatus()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         Log.d("🔥", "🔧 MainActivity onNewIntent called")
-
-        // Handle deep link when app is already running
         intent.data?.let { uri ->
             handleDeepLink(uri)
         }
@@ -97,54 +140,35 @@ class MainActivity : FragmentActivity() {
         Log.d("🔥", "🔧 Scheme: ${uri.scheme}")
         Log.d("🔥", "🔧 Host: ${uri.host}")
 
-        // 🔥 NEW: Check for manjanoapp://signin (for existing active accounts)
         if (uri.scheme == "manjanoapp" && uri.host == "signin") {
-            Log.d("🔥", "✅ SIGNIN deep link received - navigating to signin screen")
-            // Get email if present
+            Log.d("🔥", "✅ SIGNIN deep link received")
             val email = uri.getQueryParameter("email")
-            // Set navigation to signin screen (not signup)
             setSigninNavigation(email)
             return
         }
 
-        // Check for manjanoapp://verification-success (SUCCESS - has email)
         if (uri.scheme == "manjanoapp" && uri.host == "verification-success") {
             Log.d("🔥", "✅ Verification SUCCESS deep link received")
-
-            // Get email from the deep link
             val email = uri.getQueryParameter("email")
-
             if (!email.isNullOrEmpty()) {
-                Log.d("🔥", "✅ Setting verification email: $email")
                 setVerificationEmail(email)
-            } else {
-                Log.d("🔥", "No email found in success deep link")
             }
             return
         }
 
-        // Check for manjanoapp://verification-failed (ERROR - no verification)
         if (uri.scheme == "manjanoapp" && uri.host == "verification-failed") {
-            Log.d("🔥", "❌ Verification FAILED deep link received - keeping sections grayed")
-            // Do NOT call setVerificationEmail()
-            // BUT we still need to go to signup screen so user can request a new link
+            Log.d("🔥", "❌ Verification FAILED deep link received")
             _navigateToSignup.value = true
-            Log.d("🔥", "✅ Setting navigate to signup screen (failed verification)")
             return
         }
 
-        // Check for manjanoapp:// scheme (old)
         if (uri.scheme == "manjanoapp" && uri.host == "verify") {
             val email = uri.getQueryParameter("email")
-            Log.d("🔥", "🔧 Extracted email from deep link: $email")
             if (email != null && email.isNotEmpty()) {
                 setVerificationEmail(email)
             }
-        }
-        // Check for https:// scheme (web link)
-        else if (uri.scheme == "https" && uri.host == "manjano-app.web.app" && uri.path == "/verify") {
+        } else if (uri.scheme == "https" && uri.host == "manjano-app.web.app" && uri.path == "/verify") {
             val email = uri.getQueryParameter("email")
-            Log.d("🔥", "🔧 Extracted email from https link: $email")
             if (email != null && email.isNotEmpty()) {
                 setVerificationEmail(email)
             }

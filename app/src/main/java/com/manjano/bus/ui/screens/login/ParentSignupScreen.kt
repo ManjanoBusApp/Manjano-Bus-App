@@ -1349,16 +1349,13 @@ fun SignupScreen(
                         val createdOn = dateFormatter.format(now)
                         val createdTime = timeFormatter.format(now)
 
-                        val childNameMap = childrenNames.mapIndexed { index, field ->
-                            "childName${index + 1}" to field.text.trim()
-                        }.toMap()
-
                         val updateData = hashMapOf<String, Any>(
                             "parentName" to parentName.text.trim(),
                             "email" to email.text.trim(),
                             "createdOn" to createdOn,
-                            "createdTime" to createdTime
-                        ) + childNameMap
+                            "createdTime" to createdTime,
+                            "active" to true
+                        )
 
                         firestore.collection("parents")
                             .document(normalizedPhone)
@@ -1381,12 +1378,14 @@ fun SignupScreen(
                                             "createdAt" to createdTime
                                         )
 
-                                        childrenNames.forEachIndexed { index, childField ->
-                                            childData["childName${index + 1}"] = childField.text.trim()
-                                        }
-
                                         if (childrenNames.size == 1) {
+                                            // Only one child - use childName (no number)
                                             childData["childName"] = childrenNames[0].text.trim()
+                                        } else {
+                                            // Multiple children - use childName1, childName2, etc.
+                                            childrenNames.forEachIndexed { index, childField ->
+                                                childData["childName${index + 1}"] = childField.text.trim()
+                                            }
                                         }
 
                                         // Format child name(s) for document ID
