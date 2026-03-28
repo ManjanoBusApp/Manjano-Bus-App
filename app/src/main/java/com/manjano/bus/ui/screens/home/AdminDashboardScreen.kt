@@ -26,13 +26,43 @@ import androidx.compose.ui.text.font.FontWeight
 @Composable
 fun AdminDashboardScreen(
     navController: NavHostController,
+    adminMobileNumber: String,
     viewModel: AdminDashboardViewModel = hiltViewModel()
 ) {
     val loading by viewModel.loading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
+    var adminName by remember { mutableStateOf("") }
+    var isLoadingName by remember { mutableStateOf(true) }
+
     LaunchedEffect(Unit) {
         viewModel.fetchQuickData()
+    }
+
+    // Real-time listener for admin account deactivation
+    LaunchedEffect(Unit) {
+        val adminId = viewModel.getAdminIdByMobileNumber(adminMobileNumber)
+        if (adminId != null) {
+            viewModel.listenForDeactivation(adminId) {
+                navController.navigate("welcome") {
+                    popUpTo("admin_dashboard") { inclusive = true }
+                }
+            }
+        }
+    }
+
+    // Fetch admin name from Firestore
+    LaunchedEffect(adminMobileNumber) {
+        viewModel.getAdminName(adminMobileNumber) { name ->
+            adminName = name ?: ""
+            isLoadingName = false
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.removeListener()
+        }
     }
 
     Box(
@@ -76,6 +106,40 @@ fun AdminDashboardScreen(
                             textAlign = TextAlign.Center
                         )
                     }
+                }
+
+                // --- Greeting and Sign Out Row (below banner) ---
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Greeting on the left
+                    if (!isLoadingName && adminName.isNotEmpty()) {
+                        Text(
+                            text = "👋 Hello $adminName",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.Black
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.width(1.dp))
+                    }
+
+                    // Sign Out on the right
+                    Text(
+                        text = "Sign Out",
+                        color = Color.Black,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickable {
+                            navController.navigate("welcome") {
+                                popUpTo("admin_dashboard") { inclusive = true }
+                            }
+                        }
+                    )
                 }
 
                 // --- Dashboard Buttons ---

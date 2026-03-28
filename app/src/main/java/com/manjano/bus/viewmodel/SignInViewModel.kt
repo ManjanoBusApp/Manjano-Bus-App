@@ -62,8 +62,11 @@ class SignInViewModel : ViewModel() {
     private val _uiState = MutableStateFlow(SignInUiState())
     val uiState: StateFlow<SignInUiState> = _uiState
 
+    private val firestore = FirebaseFirestore.getInstance()  // ← ADD THIS LINE
+
     private var userRole: String? = null
     private var isTimerCancelled = false
+
     fun setUserRole(role: String) {
         userRole = role.lowercase()
     }
@@ -94,6 +97,22 @@ class SignInViewModel : ViewModel() {
             canResendOtp = true,
             resendTimerSeconds = 0
         )
+    }
+
+    fun getAdminByMobile(mobileNumber: String, onResult: (Map<String, Any?>?) -> Unit) {
+        firestore.collection("admins")
+            .document(mobileNumber)
+            .get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
+                    onResult(document.data)
+                } else {
+                    onResult(null)
+                }
+            }
+            .addOnFailureListener {
+                onResult(null)
+            }
     }
     fun checkPhoneNumberInFirestore(phone: String, countryIso: String) {
         val db = FirebaseFirestore.getInstance()

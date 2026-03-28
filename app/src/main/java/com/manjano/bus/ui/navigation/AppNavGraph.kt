@@ -35,12 +35,20 @@ import com.manjano.bus.MainActivity
 fun AppNavGraph(
     navController: NavHostController,
     startAtSignup: Boolean = false,
-    startAtSignin: Boolean = false
+    startAtSignin: Boolean = false,
+    deactivatedRole: String? = null
 ) {
     // Determine start destination
     val startDestination = when {
-        startAtSignin -> "signin/parent"
         startAtSignup -> "signup"
+        startAtSignin -> {
+            // 🔥 Parents go to welcome screen, drivers go to driver sign-in
+            when (deactivatedRole) {
+                "driver" -> "signin/driver"
+                "admin" -> "admin_signin"
+                else -> "welcome"  // Parents go to welcome screen
+            }
+        }
         else -> "welcome"
     }
 
@@ -152,8 +160,18 @@ fun AppNavGraph(
         }
 
         // Admin Dashboard
-        composable("admin_dashboard") { _: NavBackStackEntry ->
-            AdminDashboardScreen(navController = navController)
+        composable(
+            route = "admin_dashboard/{adminMobile}",
+            arguments = listOf(navArgument("adminMobile") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val adminMobile = URLDecoder.decode(
+                backStackEntry.arguments?.getString("adminMobile") ?: "",
+                StandardCharsets.UTF_8.toString()
+            )
+            AdminDashboardScreen(
+                navController = navController,
+                adminMobileNumber = adminMobile
+            )
         }
 
         // Admin Sign-in (separate screen)

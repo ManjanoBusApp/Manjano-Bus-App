@@ -53,7 +53,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import android.content.Context
 import android.util.Log
-
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -91,8 +92,6 @@ fun AdminSignupScreen(
     var phoneNumber by remember { mutableStateOf("") }
     var showOtpMessage by remember { mutableStateOf(false) }
     var showOtpErrorMessage by remember { mutableStateOf(false) }
-    var showUnauthorizedError by remember { mutableStateOf(false) }
-    var phoneChangeTrigger by remember { mutableIntStateOf(0) }
     val keyboardController = LocalSoftwareKeyboardController.current
     val focusManager = LocalFocusManager.current
     val scrollState = rememberScrollState()
@@ -103,7 +102,9 @@ fun AdminSignupScreen(
     val positionFocusRequester = remember { FocusRequester() }
     val phoneFocusRequester = remember { FocusRequester() }
     val context = androidx.compose.ui.platform.LocalContext.current
-
+    var showUnauthorizedError by remember { mutableStateOf(false) }
+    var unauthorizedErrorMessage by remember { mutableStateOf("Not authorized. Admin access only.") }
+    var phoneChangeTrigger by remember { mutableIntStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -297,6 +298,7 @@ fun AdminSignupScreen(
                     phoneNumber = it
                     phoneError = false
                     showUnauthorizedError = false
+                    unauthorizedErrorMessage = "Not authorized. Admin access only."
                     phoneChangeTrigger += 1   // forces recomposition
                 },
                 showError = phoneError,
@@ -310,7 +312,7 @@ fun AdminSignupScreen(
 // Move "Not authorized..." message below the Box
         if (showUnauthorizedError) {
             Text(
-                text = "Not authorized. Admin access only.",
+                text = unauthorizedErrorMessage,
                 color = Color.Red,
                 fontSize = 14.sp,
                 modifier = Modifier
@@ -373,21 +375,42 @@ fun AdminSignupScreen(
                         else -> normalizedPhone
                     }
 
-                    // Check Firestore for admin role
-                    signupViewModel.getAdminRoleByMobile(normalizedPhone) { role: String? ->
-                        if (role == null) {
+                    // Check Firestore for admin role and signup status
+                    signupViewModel.getAdminByMobile(normalizedPhone) { adminData ->
+                        if (adminData == null) {
+                            // Number not in Firestore - not authorized to sign up
+                            unauthorizedErrorMessage = "Not authorized. Admin access only."
                             showUnauthorizedError = true
                             phoneFocusRequester.requestFocus()
                         } else {
-                            showUnauthorizedError = false
-                            signupViewModel.hideSmsMessage() // hide previous SMS prompt
-                            signupViewModel.requestOtp()      // request OTP
+                            // Number exists in Firestore - check if they have completed signup
+                            val name = adminData["name"] as? String
+                            val idNumber = adminData["idNumber"] as? String
+                            val schoolName = adminData["schoolName"] as? String
+                            val position = adminData["position"] as? String
 
-                            scope.launch {
-                                delay(300)
-                                otpFocusRequester.requestFocus()
-                                scrollState.animateScrollTo(scrollState.maxValue)
-                                signupViewModel.showSmsMessage() // trigger SMS visibility
+                            val hasCompletedSignup = !name.isNullOrBlank() &&
+                                    !idNumber.isNullOrBlank() &&
+                                    !schoolName.isNullOrBlank() &&
+                                    !position.isNullOrBlank()
+
+                            if (hasCompletedSignup) {
+                                // Already signed up - should sign in instead
+                                unauthorizedErrorMessage = "You already have an account. Please sign in."
+                                showUnauthorizedError = true
+                                phoneFocusRequester.requestFocus()
+                            } else {
+                                // Number exists but not completed signup - allow sign up
+                                showUnauthorizedError = false
+                                signupViewModel.hideSmsMessage() // hide previous SMS prompt
+                                signupViewModel.requestOtp()      // request OTP
+
+                                scope.launch {
+                                    delay(300)
+                                    otpFocusRequester.requestFocus()
+                                    scrollState.animateScrollTo(scrollState.maxValue)
+                                    signupViewModel.showSmsMessage() // trigger SMS visibility
+                                }
                             }
                         }
                     }
@@ -486,9 +509,31 @@ fun AdminSignupScreen(
 
         LaunchedEffect(normalizedPhone) {
             if (normalizedPhone.length == 10) {
-                signupViewModel.getAdminRoleByMobile(normalizedPhone) { role ->
-                    isPhoneAuthorized = role != null
-                    showUnauthorizedError = role == null
+                signupViewModel.getAdminByMobile(normalizedPhone) { adminData ->
+                    if (adminData == null) {
+                        isPhoneAuthorized = false
+                        unauthorizedErrorMessage = "Not authorized. Admin access only."
+                        showUnauthorizedError = true
+                    } else {
+                        val name = adminData["name"] as? String
+                        val idNumber = adminData["idNumber"] as? String
+                        val schoolName = adminData["schoolName"] as? String
+                        val position = adminData["position"] as? String
+
+                        val hasCompletedSignup = !name.isNullOrBlank() &&
+                                !idNumber.isNullOrBlank() &&
+                                !schoolName.isNullOrBlank() &&
+                                !position.isNullOrBlank()
+
+                        if (hasCompletedSignup) {
+                            isPhoneAuthorized = false
+                            unauthorizedErrorMessage = "You already have an account. Please sign in."
+                            showUnauthorizedError = true
+                        } else {
+                            isPhoneAuthorized = true
+                            showUnauthorizedError = false
+                        }
+                    }
                 }
             } else {
                 isPhoneAuthorized = false
@@ -571,7 +616,8 @@ fun AdminSignupScreen(
                         apply()
                     }
 
-                    navController.navigate("admin_dashboard") {
+                    val encodedMobile = URLEncoder.encode(normalizedPhone, StandardCharsets.UTF_8.toString())
+                    navController.navigate("admin_dashboard/$encodedMobile") {
                         popUpTo("admin_signup") { inclusive = true }
                     }
                 }

@@ -30,6 +30,13 @@ class MainActivity : FragmentActivity() {
         private val _navigateToSignin = MutableStateFlow(false)
         val navigateToSignin = _navigateToSignin.asStateFlow()
 
+        private val _deactivatedUserRole = MutableStateFlow<String?>(null)
+        val deactivatedUserRole = _deactivatedUserRole.asStateFlow()
+
+        fun clearDeactivatedUserRole() {
+            _deactivatedUserRole.value = null
+        }
+
         fun setVerificationEmail(email: String) {
             _verificationEmail.value = email
             _pendingVerification.value = true
@@ -41,7 +48,7 @@ class MainActivity : FragmentActivity() {
         fun setSigninNavigation(email: String? = null) {
             _verificationEmail.value = email
             _pendingVerification.value = false
-            _navigateToSignup.value = false
+            _navigateToSignup.value = false  // ← This is important
             _navigateToSignin.value = true
             Log.d("🔥", "✅ Signin navigation set for existing account: $email")
         }
@@ -83,8 +90,16 @@ class MainActivity : FragmentActivity() {
                         Log.d("🔥", "Document found, active: $isActive")
                         if (!isActive) {
                             Log.d("🔥", "User deactivated - signing out")
+
+                            // 🔥 Save the user's role before clearing session
+                            val deactivatedRole = userRole
+
                             prefs.edit().clear().apply()
                             clearVerification()
+
+                            // 🔥 Store the role so we know which sign-in screen to show
+                            _deactivatedUserRole.value = deactivatedRole
+
                             val intent = Intent(this, MainActivity::class.java)
                             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
                             startActivity(intent)
@@ -143,6 +158,13 @@ class MainActivity : FragmentActivity() {
         if (uri.scheme == "manjanoapp" && uri.host == "signin") {
             Log.d("🔥", "✅ SIGNIN deep link received")
             val email = uri.getQueryParameter("email")
+
+            // 🔥 Clear any pending signup data to prevent old data from showing
+            val pendingPrefs = getSharedPreferences("pending_signup", Context.MODE_PRIVATE)
+            pendingPrefs.edit().clear().apply()
+
+            // 🔥 Clear verification state and set sign-in navigation
+            clearVerification()
             setSigninNavigation(email)
             return
         }
