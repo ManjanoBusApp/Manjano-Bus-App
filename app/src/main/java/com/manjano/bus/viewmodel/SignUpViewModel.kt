@@ -236,6 +236,21 @@ class SignUpViewModel : ViewModel() {
             .addOnFailureListener { callback(null) }
     }
 
+    fun getAdminByMobile(mobileNumber: String, onResult: (Map<String, Any?>?) -> Unit) {
+        firestore.collection("admins")
+            .document(mobileNumber)
+            .get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
+                    onResult(document.data)
+                } else {
+                    onResult(null)
+                }
+            }
+            .addOnFailureListener {
+                onResult(null)
+            }
+    }
     fun onOtpDigitChange(index: Int, digit: String) {
         val digits = _uiState.value.otpDigits.toMutableList().apply {
             this[index] = digit.take(1)

@@ -64,4 +64,21 @@ class AdminDashboardViewModel : ViewModel() {
         listenerRegistration?.remove()
         listenerRegistration = null
     }
+
+    fun getAdminName(mobileNumber: String, onResult: (String?) -> Unit) {
+        firestore.collection("admins")
+            .document(mobileNumber)
+            .get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
+                    val name = document.getString("name")
+                    onResult(name)
+                } else {
+                    onResult(null)
+                }
+            }
+            .addOnFailureListener {
+                onResult(null)
+            }
+    }
 }

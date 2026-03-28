@@ -32,6 +32,9 @@ fun AdminDashboardScreen(
     val loading by viewModel.loading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
+    var adminName by remember { mutableStateOf("") }
+    var isLoadingName by remember { mutableStateOf(true) }
+
     LaunchedEffect(Unit) {
         viewModel.fetchQuickData()
     }
@@ -45,6 +48,14 @@ fun AdminDashboardScreen(
                     popUpTo("admin_dashboard") { inclusive = true }
                 }
             }
+        }
+    }
+
+    // Fetch admin name from Firestore
+    LaunchedEffect(adminMobileNumber) {
+        viewModel.getAdminName(adminMobileNumber) { name ->
+            adminName = name ?: ""
+            isLoadingName = false
         }
     }
 
@@ -97,13 +108,27 @@ fun AdminDashboardScreen(
                     }
                 }
 
-                // --- Sign Out Button (below banner) ---
-                Box(
+                // --- Greeting and Sign Out Row (below banner) ---
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(top = 8.dp),
-                    contentAlignment = Alignment.CenterEnd
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
+                    // Greeting on the left
+                    if (!isLoadingName && adminName.isNotEmpty()) {
+                        Text(
+                            text = "👋 Hello $adminName",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color.Black
+                        )
+                    } else {
+                        Spacer(modifier = Modifier.width(1.dp))
+                    }
+
+                    // Sign Out on the right
                     Text(
                         text = "Sign Out",
                         color = Color.Black,

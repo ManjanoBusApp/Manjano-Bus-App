@@ -214,8 +214,10 @@ fun AdminSignInScreen(
                         )
 
                         viewModel.getAdminByMobile(normalizedInput) { adminData ->
+                            Log.d("AdminSignInDebug", "adminData: $adminData")
                             if (adminData == null) {
                                 // Number not found in Firestore
+                                Log.d("AdminSignInDebug", "Case: adminData == null")
                                 unauthorizedErrorMessage = "Not authorized. Admin access only."
                                 showUnauthorizedError = true
                                 phoneFocusRequester.requestFocus()
@@ -227,24 +229,32 @@ fun AdminSignInScreen(
                                 val schoolName = adminData["schoolName"] as? String
                                 val position = adminData["position"] as? String
 
+                                Log.d("AdminSignInDebug", "name: '$name', idNumber: '$idNumber', schoolName: '$schoolName', position: '$position'")
+                                Log.d("AdminSignInDebug", "role: '$role', isActive: '$isActive'")
+
                                 // Check if admin has completed signup
                                 val hasCompletedSignup = !name.isNullOrBlank() &&
                                         !idNumber.isNullOrBlank() &&
                                         !schoolName.isNullOrBlank() &&
                                         !position.isNullOrBlank()
 
-                                if (role == null || !isActive) {
-                                    // Not authorized or deactivated
+                                Log.d("AdminSignInDebug", "hasCompletedSignup: $hasCompletedSignup")
+
+                                if (!isActive) {
+                                    // Deactivated account
+                                    Log.d("AdminSignInDebug", "Case: !isActive")
                                     unauthorizedErrorMessage = "Not authorized. Admin access only."
                                     showUnauthorizedError = true
                                     phoneFocusRequester.requestFocus()
                                 } else if (!hasCompletedSignup) {
-                                    // Number exists but hasn't completed signup
+                                    // Number exists but hasn't completed signup (includes pre-added admins with no role)
+                                    Log.d("AdminSignInDebug", "Case: !hasCompletedSignup")
                                     unauthorizedErrorMessage = "You have no account. Please sign up first."
                                     showUnauthorizedError = true
                                     phoneFocusRequester.requestFocus()
                                 } else {
                                     // Number authorized, active, and signed up
+                                    Log.d("AdminSignInDebug", "Case: signed up - sending OTP")
                                     showUnauthorizedError = false
                                     viewModel.requestOtp()
                                     hasRequestedOtp = true
@@ -409,11 +419,8 @@ fun AdminSignInScreen(
                                     !schoolName.isNullOrBlank() &&
                                     !position.isNullOrBlank()
 
-                            if (role == null) {
-                                isPhoneAuthorized = false
-                                unauthorizedErrorMessage = "Not authorized. Admin access only."
-                                showUnauthorizedError = true
-                            } else if (!hasCompletedSignup) {
+                            if (!hasCompletedSignup) {
+                                // Number exists but hasn't completed signup (includes pre-added admins with no role)
                                 isPhoneAuthorized = false
                                 unauthorizedErrorMessage = "You have no account. Please sign up first."
                                 showUnauthorizedError = true
