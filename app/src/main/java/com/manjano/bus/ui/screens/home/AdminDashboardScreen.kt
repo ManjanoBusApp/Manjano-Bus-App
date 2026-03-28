@@ -78,6 +78,26 @@ fun AdminDashboardScreen(
                     }
                 }
 
+                // --- Sign Out Button (below banner) ---
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 8.dp),
+                    contentAlignment = Alignment.CenterEnd
+                ) {
+                    Text(
+                        text = "Sign Out",
+                        color = Color.Black,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.clickable {
+                            navController.navigate("welcome") {
+                                popUpTo("admin_dashboard") { inclusive = true }
+                            }
+                        }
+                    )
+                }
+
                 // --- Dashboard Buttons ---
                 DashboardButton("Real-Time Bus Tracking", Icons.Filled.DirectionsBus) {
                     navController.navigate("bus_tracking")
