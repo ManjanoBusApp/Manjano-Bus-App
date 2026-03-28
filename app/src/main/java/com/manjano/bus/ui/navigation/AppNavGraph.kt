@@ -35,12 +35,20 @@ import com.manjano.bus.MainActivity
 fun AppNavGraph(
     navController: NavHostController,
     startAtSignup: Boolean = false,
-    startAtSignin: Boolean = false
+    startAtSignin: Boolean = false,
+    deactivatedRole: String? = null
 ) {
     // Determine start destination
     val startDestination = when {
-        startAtSignin -> "signin/parent"
         startAtSignup -> "signup"
+        startAtSignin -> {
+            // 🔥 Parents go to welcome screen, drivers go to driver sign-in
+            when (deactivatedRole) {
+                "driver" -> "signin/driver"
+                "admin" -> "admin_signin"
+                else -> "welcome"  // Parents go to welcome screen
+            }
+        }
         else -> "welcome"
     }
 

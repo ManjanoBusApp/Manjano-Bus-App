@@ -2,6 +2,8 @@ package com.manjano.bus.ui
 
 import android.content.Context
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.rememberNavController
 import com.manjano.bus.MainActivity
@@ -22,15 +24,17 @@ fun ManjanoAppUI(
 
     // Determine if we should start at signup screen
     val shouldStartAtSignup = startAtSignup || hasPendingSignup
-
-    // 🔥 NEW: Check if we should start at signin screen (existing active account)
     val shouldStartAtSignin = MainActivity.shouldNavigateToSignin()
+
+    // 🔥 Properly collect the StateFlow value
+    val deactivatedRole by MainActivity.deactivatedUserRole.collectAsState()
 
     ManjanoTheme {
         AppNavGraph(
             navController = navController,
             startAtSignup = shouldStartAtSignup,
-            startAtSignin = shouldStartAtSignin  // 🔥 Pass to AppNavGraph
+            startAtSignin = shouldStartAtSignin,
+            deactivatedRole = deactivatedRole
         )
     }
 }

@@ -30,6 +30,13 @@ class MainActivity : FragmentActivity() {
         private val _navigateToSignin = MutableStateFlow(false)
         val navigateToSignin = _navigateToSignin.asStateFlow()
 
+        private val _deactivatedUserRole = MutableStateFlow<String?>(null)
+        val deactivatedUserRole = _deactivatedUserRole.asStateFlow()
+
+        fun clearDeactivatedUserRole() {
+            _deactivatedUserRole.value = null
+        }
+
         fun setVerificationEmail(email: String) {
             _verificationEmail.value = email
             _pendingVerification.value = true
@@ -83,8 +90,16 @@ class MainActivity : FragmentActivity() {
                         Log.d("🔥", "Document found, active: $isActive")
                         if (!isActive) {
                             Log.d("🔥", "User deactivated - signing out")
+
+                            // 🔥 Save the user's role before clearing session
+                            val deactivatedRole = userRole
+
                             prefs.edit().clear().apply()
                             clearVerification()
+
+                            // 🔥 Store the role so we know which sign-in screen to show
+                            _deactivatedUserRole.value = deactivatedRole
+
                             val intent = Intent(this, MainActivity::class.java)
                             intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
                             startActivity(intent)
