@@ -160,8 +160,18 @@ fun AppNavGraph(
         }
 
         // Admin Dashboard
-        composable("admin_dashboard") { _: NavBackStackEntry ->
-            AdminDashboardScreen(navController = navController)
+        composable(
+            route = "admin_dashboard/{adminMobile}",
+            arguments = listOf(navArgument("adminMobile") { type = NavType.StringType })
+        ) { backStackEntry ->
+            val adminMobile = URLDecoder.decode(
+                backStackEntry.arguments?.getString("adminMobile") ?: "",
+                StandardCharsets.UTF_8.toString()
+            )
+            AdminDashboardScreen(
+                navController = navController,
+                adminMobileNumber = adminMobile
+            )
         }
 
         // Admin Sign-in (separate screen)

@@ -26,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 @Composable
 fun AdminDashboardScreen(
     navController: NavHostController,
+    adminMobileNumber: String,
     viewModel: AdminDashboardViewModel = hiltViewModel()
 ) {
     val loading by viewModel.loading.collectAsState()
@@ -33,6 +34,24 @@ fun AdminDashboardScreen(
 
     LaunchedEffect(Unit) {
         viewModel.fetchQuickData()
+    }
+
+    // Real-time listener for admin account deactivation
+    LaunchedEffect(Unit) {
+        val adminId = viewModel.getAdminIdByMobileNumber(adminMobileNumber)
+        if (adminId != null) {
+            viewModel.listenForDeactivation(adminId) {
+                navController.navigate("welcome") {
+                    popUpTo("admin_dashboard") { inclusive = true }
+                }
+            }
+        }
+    }
+
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.removeListener()
+        }
     }
 
     Box(

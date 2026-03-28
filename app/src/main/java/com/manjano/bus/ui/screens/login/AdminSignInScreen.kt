@@ -66,8 +66,18 @@ fun AdminSignInScreen(
 
     LaunchedEffect(uiState.navigateToDashboard) {
         if (uiState.navigateToDashboard) {
+            // Get the normalized phone number from ViewModel or from the phone input
+            val rawPhone = uiState.rawPhoneInput.filter { it.isDigit() }
+            val normalizedInput = when {
+                rawPhone.startsWith("254") -> "0" + rawPhone.substring(3)
+                rawPhone.startsWith("7") && rawPhone.length == 9 -> "0$rawPhone"
+                rawPhone.startsWith("07") -> rawPhone
+                rawPhone.startsWith("011") -> rawPhone
+                else -> rawPhone
+            }
 
-            navController.navigate("admin_dashboard") {
+            val encodedMobile = URLEncoder.encode(normalizedInput, StandardCharsets.UTF_8.toString())
+            navController.navigate("admin_dashboard/$encodedMobile") {
                 popUpTo("signin/admin") { inclusive = true }
             }
 
@@ -202,27 +212,36 @@ fun AdminSignInScreen(
                             "Normalized phone for Firestore query: $normalizedInput"
                         )
 
-                        viewModel.getAdminRoleByMobile(normalizedInput) { role ->
-                            if (role == null) {
-                                // Number not authorized
+                        viewModel.getAdminByMobile(normalizedInput) { adminData ->
+                            if (adminData == null) {
+                                // Number not found
                                 showUnauthorizedError = true
                                 phoneFocusRequester.requestFocus()
                             } else {
-                                // Number authorized
-                                showUnauthorizedError = false
-                                viewModel.requestOtp()
-                                hasRequestedOtp = true
+                                val role = adminData["role"] as? String
+                                val isActive = adminData["active"] as? Boolean ?: true
 
-                                scope.launch {
-                                    delay(300)
-                                    focusManager.clearFocus(force = true)
-                                    otpFocusRequester.requestFocus()
-                                    scrollState.animateScrollTo(scrollState.maxValue)
+                                if (role == null || !isActive) {
+                                    // Not authorized or deactivated
+                                    showUnauthorizedError = true
+                                    phoneFocusRequester.requestFocus()
+                                } else {
+                                    // Number authorized and active
+                                    showUnauthorizedError = false
+                                    viewModel.requestOtp()
+                                    hasRequestedOtp = true
+
+                                    scope.launch {
+                                        delay(300)
+                                        focusManager.clearFocus(force = true)
+                                        otpFocusRequester.requestFocus()
+                                        scrollState.animateScrollTo(scrollState.maxValue)
+                                    }
+
+                                    viewModel.setTargetDashboardRoute(
+                                        if (role == "super_admin") "super_admin_dashboard" else "admin_dashboard"
+                                    )
                                 }
-
-                                viewModel.setTargetDashboardRoute(
-                                    if (role == "super_admin") "super_admin_dashboard" else "admin_dashboard"
-                                )
                             }
                         }
                     }
@@ -354,9 +373,26 @@ fun AdminSignInScreen(
                 }
 
                 if (normalizedInput.length == 10) {
-                    viewModel.getAdminRoleByMobile(normalizedInput) { role ->
-                        isPhoneAuthorized = role != null
-                        showUnauthorizedError = role == null
+                    viewModel.getAdminByMobile(normalizedInput) { adminData ->
+                        if (adminData == null) {
+                            isPhoneAuthorized = false
+                            showUnauthorizedError = true
+                        } else {
+                            val role = adminData["role"] as? String
+                            val name = adminData["name"] as? String
+                            val idNumber = adminData["idNumber"] as? String
+                            val schoolName = adminData["schoolName"] as? String
+                            val position = adminData["position"] as? String
+
+                            // Check if admin has completed signup (has all required fields)
+                            val hasCompletedSignup = !name.isNullOrBlank() &&
+                                    !idNumber.isNullOrBlank() &&
+                                    !schoolName.isNullOrBlank() &&
+                                    !position.isNullOrBlank()
+
+                            isPhoneAuthorized = role != null && hasCompletedSignup
+                            showUnauthorizedError = role == null || !hasCompletedSignup
+                        }
                     }
                 } else {
                     isPhoneAuthorized = false

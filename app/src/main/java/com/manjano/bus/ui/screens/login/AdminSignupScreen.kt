@@ -53,7 +53,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import android.content.Context
 import android.util.Log
-
+import java.net.URLEncoder
+import java.nio.charset.StandardCharsets
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -571,7 +572,8 @@ fun AdminSignupScreen(
                         apply()
                     }
 
-                    navController.navigate("admin_dashboard") {
+                    val encodedMobile = URLEncoder.encode(normalizedPhone, StandardCharsets.UTF_8.toString())
+                    navController.navigate("admin_dashboard/$encodedMobile") {
                         popUpTo("admin_signup") { inclusive = true }
                     }
                 }
