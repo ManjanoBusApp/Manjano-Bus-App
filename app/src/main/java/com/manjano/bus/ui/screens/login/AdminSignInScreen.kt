@@ -61,7 +61,7 @@ fun AdminSignInScreen(
     var showUnauthorizedError by remember { mutableStateOf(false) }
     var hasRequestedOtp by rememberSaveable { mutableStateOf(false) }
     val context = androidx.compose.ui.platform.LocalContext.current
-
+    var unauthorizedErrorMessage by remember { mutableStateOf("Not authorized. Admin access only.") }
     val signUpUiState by signUpViewModel.uiState.collectAsStateWithLifecycle()
 
     LaunchedEffect(uiState.navigateToDashboard) {
@@ -137,6 +137,7 @@ fun AdminSignInScreen(
                             viewModel.onPhoneNumberChange(it)
                             showPhoneError = false
                             showUnauthorizedError = false
+                            unauthorizedErrorMessage = "Not authorized. Admin access only."
                         },
                         showError = showPhoneError,
                         onShowErrorChange = { showPhoneError = it },
@@ -147,7 +148,7 @@ fun AdminSignInScreen(
 
                     if (showUnauthorizedError) {
                         Text(
-                            text = "Not authorized. Admin access only.",
+                            text = unauthorizedErrorMessage,
                             color = Color.Red,
                             fontSize = 14.sp,
                             modifier = Modifier
@@ -214,19 +215,36 @@ fun AdminSignInScreen(
 
                         viewModel.getAdminByMobile(normalizedInput) { adminData ->
                             if (adminData == null) {
-                                // Number not found
+                                // Number not found in Firestore
+                                unauthorizedErrorMessage = "Not authorized. Admin access only."
                                 showUnauthorizedError = true
                                 phoneFocusRequester.requestFocus()
                             } else {
                                 val role = adminData["role"] as? String
                                 val isActive = adminData["active"] as? Boolean ?: true
+                                val name = adminData["name"] as? String
+                                val idNumber = adminData["idNumber"] as? String
+                                val schoolName = adminData["schoolName"] as? String
+                                val position = adminData["position"] as? String
+
+                                // Check if admin has completed signup
+                                val hasCompletedSignup = !name.isNullOrBlank() &&
+                                        !idNumber.isNullOrBlank() &&
+                                        !schoolName.isNullOrBlank() &&
+                                        !position.isNullOrBlank()
 
                                 if (role == null || !isActive) {
                                     // Not authorized or deactivated
+                                    unauthorizedErrorMessage = "Not authorized. Admin access only."
+                                    showUnauthorizedError = true
+                                    phoneFocusRequester.requestFocus()
+                                } else if (!hasCompletedSignup) {
+                                    // Number exists but hasn't completed signup
+                                    unauthorizedErrorMessage = "You have no account. Please sign up first."
                                     showUnauthorizedError = true
                                     phoneFocusRequester.requestFocus()
                                 } else {
-                                    // Number authorized and active
+                                    // Number authorized, active, and signed up
                                     showUnauthorizedError = false
                                     viewModel.requestOtp()
                                     hasRequestedOtp = true
@@ -376,6 +394,7 @@ fun AdminSignInScreen(
                     viewModel.getAdminByMobile(normalizedInput) { adminData ->
                         if (adminData == null) {
                             isPhoneAuthorized = false
+                            unauthorizedErrorMessage = "Not authorized. Admin access only."
                             showUnauthorizedError = true
                         } else {
                             val role = adminData["role"] as? String
@@ -390,8 +409,18 @@ fun AdminSignInScreen(
                                     !schoolName.isNullOrBlank() &&
                                     !position.isNullOrBlank()
 
-                            isPhoneAuthorized = role != null && hasCompletedSignup
-                            showUnauthorizedError = role == null || !hasCompletedSignup
+                            if (role == null) {
+                                isPhoneAuthorized = false
+                                unauthorizedErrorMessage = "Not authorized. Admin access only."
+                                showUnauthorizedError = true
+                            } else if (!hasCompletedSignup) {
+                                isPhoneAuthorized = false
+                                unauthorizedErrorMessage = "You have no account. Please sign up first."
+                                showUnauthorizedError = true
+                            } else {
+                                isPhoneAuthorized = true
+                                showUnauthorizedError = false
+                            }
                         }
                     }
                 } else {
@@ -399,9 +428,9 @@ fun AdminSignInScreen(
                     showUnauthorizedError = false
                 }
             }
-            // ────────────────────────────────────────────────
+
 // Phone validity (exact same logic you already have)
-// ────────────────────────────────────────────────
+
             val isPhoneValid by remember(uiState.rawPhoneInput, uiState.selectedCountry) {
                 derivedStateOf {
                     try {
