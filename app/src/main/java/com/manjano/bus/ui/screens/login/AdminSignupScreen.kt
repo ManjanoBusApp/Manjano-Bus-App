@@ -170,7 +170,7 @@ fun AdminSignupScreen(
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused && adminName.text.isNotEmpty()) adminError = false
                 },
-            textStyle = TextStyle(fontSize = 16.sp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             shape = RoundedCornerShape(12.dp),
             isError = adminError
         )
@@ -201,7 +201,7 @@ fun AdminSignupScreen(
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) idError = false
                 },
-            textStyle = TextStyle(fontSize = 16.sp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             shape = RoundedCornerShape(12.dp),
             isError = idError
         )
@@ -235,7 +235,7 @@ fun AdminSignupScreen(
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) schoolError = false
                 },
-            textStyle = TextStyle(fontSize = 16.sp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             shape = RoundedCornerShape(12.dp),
             isError = schoolError
         )
@@ -269,7 +269,7 @@ fun AdminSignupScreen(
                 .onFocusChanged { focusState ->
                     if (focusState.isFocused) positionError = false
                 },
-            textStyle = TextStyle(fontSize = 16.sp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             shape = RoundedCornerShape(12.dp),
             isError = positionError
         )

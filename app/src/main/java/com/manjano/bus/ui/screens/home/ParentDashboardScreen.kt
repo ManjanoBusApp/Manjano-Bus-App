@@ -79,6 +79,10 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.manjano.bus.R
 import kotlinx.coroutines.launch
+import com.google.firebase.database.ValueEventListener
+import com.google.firebase.database.DataSnapshot
+import com.google.firebase.database.DatabaseError
+import android.content.Context
 
 data class Child(
     val name: String = "",
@@ -129,7 +133,44 @@ fun ParentDashboardScreen(
         }
     }
 
+    // Initialize database reference
     val database = FirebaseDatabase.getInstance().reference
+    val context = LocalContext.current
+
+    // Listen for parent's active status changes
+    LaunchedEffect(parentName) {
+        if (parentName.isNotEmpty()) {
+            val parentKey = parentName.trim().lowercase().replace(Regex("[^a-z0-9]"), "_")
+            val parentActiveRef = database.child("parents").child(parentKey).child("active")
+
+            parentActiveRef.addValueEventListener(object : ValueEventListener {
+                override fun onDataChange(snapshot: DataSnapshot) {
+                    val isActive = snapshot.getValue(Boolean::class.java) ?: true
+                    Log.d("🔥", "Parent active status changed: $isActive")
+
+                    if (!isActive) {
+                        Log.d("🔥", "Parent deactivated - signing out")
+
+                        // Clear session
+                        val prefs = context.getSharedPreferences("user_session", Context.MODE_PRIVATE)
+                        prefs.edit().clear().apply()
+
+                        // Navigate to welcome screen
+                        navController.navigate("welcome") {
+                            popUpTo(navController.graph.startDestinationId) { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
+                }
+
+                override fun onCancelled(error: DatabaseError) {
+                    Log.e("🔥", "Failed to listen to parent active status", error.toException())
+                }
+            })
+        }
+    }
+
+
     val selectedAction = remember { mutableStateOf("Contact Driver") }
     val showTextBox = remember { mutableStateOf(false) }
     val textInput = remember { mutableStateOf("") }

@@ -104,6 +104,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.clickable
 import androidx.compose.runtime.collectAsState
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
+
+
 
 data class MailboxLayerResult(
     val isValidSyntax: Boolean,
@@ -278,6 +283,252 @@ fun SignupOtpInputRow(
     }
 }
 
+data class AutocompleteSuggestion(
+    val placeId: String,
+    val description: String
+)
+
+data class PlaceDetails(
+    val placeId: String,
+    val address: String,
+    val lat: Double,
+    val lng: Double
+)
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun LocationAutocompleteField(
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+    placeholder: String,
+    isError: Boolean,
+    onLocationSelected: (placeId: String, address: String, lat: Double, lng: Double) -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var suggestions by remember { mutableStateOf<List<AutocompleteSuggestion>>(emptyList()) }
+    var isSearching by remember { mutableStateOf(false) }
+    val focusRequester = remember { FocusRequester() }
+
+    // Debounce timer to avoid too many API calls
+    var debounceJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    suspend fun fetchAutocompleteSuggestions(query: String): List<AutocompleteSuggestion> = withContext(Dispatchers.IO) {
+        if (query.length < 2) return@withContext emptyList()
+        try {
+            // Using Places API (New) - Autocomplete (Predictions)
+            val url = "https://places.googleapis.com/v1/places:autocomplete"
+
+            val requestBody = """
+                {
+                    "input": "$query",
+                    "includedRegionCodes": ["KE"],
+                    "languageCode": "en"
+                }
+            """.trimIndent()
+
+            val client = OkHttpClient()
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("X-Goog-Api-Key", "AIzaSyAw9C7fTPJHwzl-KWiLPwaNjq0iYdXd7wo")
+                .post(requestBody.toRequestBody("application/json".toMediaType()))
+                .build()
+
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string() ?: ""
+
+            if (!response.isSuccessful) {
+                Log.e("Places", "API error: ${response.code} - $responseBody")
+                return@withContext emptyList()
+            }
+
+            // Parse JSON response
+            val json = org.json.JSONObject(responseBody)
+            val suggestionsArray = json.optJSONArray("suggestions") ?: return@withContext emptyList()
+
+            val result = mutableListOf<AutocompleteSuggestion>()
+            for (i in 0 until suggestionsArray.length()) {
+                val suggestion = suggestionsArray.getJSONObject(i)
+                val placePrediction = suggestion.optJSONObject("placePrediction")
+                if (placePrediction != null) {
+                    val placeId = placePrediction.optString("placeId", "")
+                    val description = placePrediction.optString("text", "")
+                        .let { textObj ->
+                            if (textObj.isNotEmpty()) {
+                                org.json.JSONObject(textObj).optString("text", "")
+                            } else ""
+                        }
+                    if (placeId.isNotEmpty() && description.isNotEmpty()) {
+                        // Filter out Plus Codes (pattern like "XXXX+XX" or "XXXX+XXX" anywhere at start)
+                        val isPlusCode = description.matches(Regex("^[A-Z0-9]{4,5}\\+[A-Z0-9]{2,3}(\\s|$).*"))
+                        // Filter out coordinates (pattern like "-1.283, 36.817")
+                        val isCoordinates = description.matches(Regex("^-?\\d+\\.\\d+,\\s*-?\\d+\\.\\d+$"))
+                        // Filter out very short descriptions
+                        val isTooShort = description.length < 5
+                        // Filter out pure numbers
+                        val isOnlyNumbers = description.matches(Regex("^\\d+$"))
+
+                        if (!isPlusCode && !isCoordinates && !isTooShort && !isOnlyNumbers) {
+                            result.add(AutocompleteSuggestion(placeId, description))
+                        }
+                    }
+                }
+            }
+
+            Log.d("Places", "Got ${result.size} suggestions for: $query")
+            result
+        } catch (e: Exception) {
+            Log.e("Places", "Error fetching suggestions: ${e.message}", e)
+            emptyList()
+        }
+    }
+
+    suspend fun fetchPlaceDetails(placeId: String): PlaceDetails? = withContext(Dispatchers.IO) {
+        try {
+            val url = "https://places.googleapis.com/v1/places/$placeId"
+
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Content-Type", "application/json")
+                .addHeader("X-Goog-Api-Key", "AIzaSyAw9C7fTPJHwzl-KWiLPwaNjq0iYdXd7wo")
+                .addHeader("X-Goog-FieldMask", "id,formattedAddress,location")
+                .get()
+                .build()
+
+            val client = OkHttpClient()
+            val response = client.newCall(request).execute()
+            val responseBody = response.body?.string() ?: ""
+
+            if (!response.isSuccessful) {
+                Log.e("Places", "Place details error: ${response.code}")
+                return@withContext null
+            }
+
+            val json = JSONObject(responseBody)
+            val address = json.optString("formattedAddress", "")
+            val location = json.optJSONObject("location")
+            val lat = location?.optDouble("latitude") ?: 0.0
+            val lng = location?.optDouble("longitude") ?: 0.0
+
+            PlaceDetails(placeId, address, lat, lng)
+        } catch (e: Exception) {
+            Log.e("Places", "Error fetching place details: ${e.message}", e)
+            null
+        }
+    }
+    Column(modifier = modifier) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = { newValue ->
+                // Auto-capitalize: capitalize first letter of each word
+                val capitalizedText = newValue.text.split(" ").joinToString(" ") { word ->
+                    if (word.isNotEmpty()) {
+                        word.replaceFirstChar { it.uppercase() }
+                    } else {
+                        word
+                    }
+                }
+                val capitalizedValue = newValue.copy(text = capitalizedText)
+                onValueChange(capitalizedValue)
+
+                debounceJob?.cancel()
+
+                if (capitalizedText.length >= 2) {
+                    isSearching = true
+                    debounceJob = scope.launch {
+                        delay(500)
+                        try {
+                            // Use the original text for API search (not capitalized)
+                            val results = fetchAutocompleteSuggestions(newValue.text)
+                            suggestions = results
+                        } catch (e: Exception) {
+                            Log.e("Places", "Error", e)
+                            suggestions = emptyList()
+                        } finally {
+                            isSearching = false
+                        }
+                    }
+                } else {
+                    suggestions = emptyList()
+                    isSearching = false
+                }
+            },
+            placeholder = { Text(placeholder) },
+            singleLine = true,
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
+            shape = RoundedCornerShape(12.dp),
+            isError = isError,
+            enabled = enabled,
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Words
+            )
+        )
+
+        if (isError) {
+            Text(
+                text = if (placeholder.contains("pick up", ignoreCase = true)) "Please select pick up" else "Please select drop off",
+                color = Color.Red,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(top = 2.dp)
+            )
+        }
+
+        if (isSearching && suggestions.isEmpty()) {
+            Text(
+                text = "Searching locations...",
+                fontSize = 12.sp,
+                color = Color.Gray,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+        }
+
+        if (suggestions.isNotEmpty() && value.text.isNotEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color.White, shape = RoundedCornerShape(8.dp))
+                    .padding(vertical = 8.dp)
+            ) {
+                Column {
+                    suggestions.forEach { suggestion ->
+                        Text(
+                            text = suggestion.description,
+                            fontSize = 14.sp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        try {
+                                            // Fetch details to get coordinates, but keep the original suggestion description
+                                            val details = fetchPlaceDetails(suggestion.placeId)
+                                            if (details != null) {
+                                                onLocationSelected(
+                                                    suggestion.placeId,      // Use placeId from suggestion
+                                                    suggestion.description,   // Use the suggestion description (proper name)
+                                                    details.lat,              // Use coordinates from API
+                                                    details.lng               // Use coordinates from API
+                                                )
+                                                suggestions = emptyList()
+                                            }
+                                        } catch (e: Exception) {
+                                            Log.e("Places", "Error selecting place", e)
+                                        }
+                                    }
+                                }
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            color = Color(0xFF333333)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
+                }
+            }
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -412,7 +663,7 @@ fun SignupScreen(
                     if (focusState.isFocused) parentError = false
                     else parentError = parentName.text.isBlank()
                 },
-            textStyle = TextStyle(fontSize = 16.sp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             shape = RoundedCornerShape(12.dp),
             isError = parentError
         )
@@ -427,15 +678,32 @@ fun SignupScreen(
         var childErrors by remember { mutableStateOf(listOf(false)) }
         var hasTouchedChild by remember { mutableStateOf(listOf(false)) }
 
+        // Per-child location data class
+        data class ChildLocationData(
+            val pickUpLocation: TextFieldValue = TextFieldValue(""),
+            val dropOffLocation: TextFieldValue = TextFieldValue(""),
+            val pickUpError: Boolean = false,
+            val dropOffError: Boolean = false,
+            val hasTouchedPickUp: Boolean = false,
+            val hasTouchedDropOff: Boolean = false,
+            val pickUpPlaceId: String = "",
+            val dropOffPlaceId: String = "",
+            val pickUpLatLng: Pair<Double, Double>? = null,
+            val dropOffLatLng: Pair<Double, Double>? = null
+        )
+
+        var childLocations by remember { mutableStateOf(listOf(ChildLocationData())) }
         // 🔥 LOAD SAVED DATA WHEN SCREEN OPENS
         LaunchedEffect(Unit) {
             val savedParentName = prefs.getString("pending_parent_name", "") ?: ""
             val savedChildren = prefs.getString("pending_children", "") ?: ""
             val savedEmail = prefs.getString("pending_email", "") ?: ""
+            val savedLocations = prefs.getString("pending_locations", "") ?: ""
 
             Log.d("🔥", "Loading saved data - Parent: $savedParentName")
             Log.d("🔥", "Loading saved data - Email: $savedEmail")
             Log.d("🔥", "Loading saved data - Children: $savedChildren")
+            Log.d("🔥", "Loading saved data - Locations: $savedLocations")
 
             // Restore parent name
             if (savedParentName.isNotEmpty()) {
@@ -453,6 +721,35 @@ fun SignupScreen(
                 childrenNames = childrenList.map { TextFieldValue(it) }
                 childErrors = List(childrenList.size) { false }
                 hasTouchedChild = List(childrenList.size) { true }
+
+                // Restore locations for each child
+                if (savedLocations.isNotEmpty()) {
+                    val locationsList = savedLocations.split("|||")
+                    if (locationsList.size == childrenList.size) {
+                        val restoredLocations = locationsList.mapIndexed { idx, locationData ->
+                            val parts = locationData.split("|")
+                            if (parts.size >= 8) {
+                                ChildLocationData(
+                                    pickUpLocation = TextFieldValue(parts[0]),
+                                    dropOffLocation = TextFieldValue(parts[1]),
+                                    pickUpPlaceId = parts[2],
+                                    dropOffPlaceId = parts[3],
+                                    pickUpLatLng = if (parts[4].toDoubleOrNull() != 0.0 || parts[5].toDoubleOrNull() != 0.0)
+                                        Pair(parts[4].toDoubleOrNull() ?: 0.0, parts[5].toDoubleOrNull() ?: 0.0) else null,
+                                    dropOffLatLng = if (parts[6].toDoubleOrNull() != 0.0 || parts[7].toDoubleOrNull() != 0.0)
+                                        Pair(parts[6].toDoubleOrNull() ?: 0.0, parts[7].toDoubleOrNull() ?: 0.0) else null,
+                                    pickUpError = false,
+                                    dropOffError = false,
+                                    hasTouchedPickUp = true,
+                                    hasTouchedDropOff = true
+                                )
+                            } else {
+                                ChildLocationData()
+                            }
+                        }
+                        childLocations = restoredLocations
+                    }
+                }
             }
         }
 // Add new child
@@ -460,9 +757,11 @@ fun SignupScreen(
             val newChildren = childrenNames.toMutableList().apply { add(TextFieldValue("")) }
             val newErrors = childErrors.toMutableList().apply { add(false) }
             val newTouched = hasTouchedChild.toMutableList().apply { add(false) }
+            val newLocations = childLocations.toMutableList().apply { add(ChildLocationData()) }
             childrenNames = newChildren
             childErrors = newErrors
             hasTouchedChild = newTouched
+            childLocations = newLocations
         }
 
 
@@ -472,15 +771,26 @@ fun SignupScreen(
                 childrenNames = childrenNames.filterIndexed { i, _ -> i != index }
                 childErrors = childErrors.filterIndexed { i, _ -> i != index }
                 hasTouchedChild = hasTouchedChild.filterIndexed { i, _ -> i != index }
+                childLocations = childLocations.filterIndexed { i, _ -> i != index }
             }
         }
 
 
-// Column for all child fields
+// Ensure childLocations matches childrenNames size
+        if (childLocations.size != childrenNames.size) {
+            childLocations = List(childrenNames.size) { ChildLocationData() }
+        }
+
+        // Column for all child fields with per-child locations
         Column {
             childrenNames.forEachIndexed { index, childName ->
+                // Safety check for index
+                if (index >= childLocations.size) return@forEachIndexed
+
                 Column(modifier = Modifier.fillMaxWidth()) {
                     val childFocusRequester = remember { FocusRequester() }
+
+                    // Child Name Field
                     OutlinedTextField(
                         value = childName,
                         onValueChange = { newValue ->
@@ -493,7 +803,6 @@ fun SignupScreen(
                             childrenNames = updatedChildren
                             hasTouchedChild = updatedTouched
                         },
-
                         placeholder = { Text("Child 'First.Middle.Last' Name") },
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Text,
@@ -508,43 +817,104 @@ fun SignupScreen(
                                     val updatedTouched = hasTouchedChild.toMutableList()
                                     updatedTouched[index] = true
                                     hasTouchedChild = updatedTouched
-
                                     val updatedErrors = childErrors.toMutableList()
                                     updatedErrors[index] = false
                                     childErrors = updatedErrors
                                 }
-
                                 if (!focusState.isFocused && hasTouchedChild[index]) {
                                     val updatedErrors = childErrors.toMutableList()
                                     updatedErrors[index] = childrenNames[index].text.isBlank()
                                     childErrors = updatedErrors
                                 }
                             },
-
-                        textStyle = TextStyle(fontSize = 16.sp),
+                        textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
                         shape = RoundedCornerShape(12.dp),
                         isError = childErrors[index]
                     )
 
-                    // Error message
                     if (childErrors[index]) {
                         Text(
                             "Please fill child's name",
                             color = Color.Red,
                             fontSize = 12.sp,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 2.dp)
+                            modifier = Modifier.padding(top = 2.dp)
                         )
                     }
 
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Pick Up Location for this child
+                    if (index < childLocations.size) {
+                        LocationAutocompleteField(
+                            value = childLocations[index].pickUpLocation,
+                            onValueChange = { newValue ->
+                                val updatedLocations = childLocations.toMutableList()
+                                updatedLocations[index] = updatedLocations[index].copy(
+                                    pickUpLocation = newValue,
+                                    pickUpError = false,
+                                    hasTouchedPickUp = true,
+                                    pickUpPlaceId = "",
+                                    pickUpLatLng = null
+                                )
+                                childLocations = updatedLocations
+                            },
+                            placeholder = "Select pick up location",
+                            isError = childLocations[index].pickUpError,
+                            onLocationSelected = { placeId, address, lat, lng ->
+                                val updatedLocations = childLocations.toMutableList()
+                                updatedLocations[index] = updatedLocations[index].copy(
+                                    pickUpLocation = TextFieldValue(address),
+                                    pickUpPlaceId = placeId,
+                                    pickUpLatLng = Pair(lat, lng),
+                                    pickUpError = false
+                                )
+                                childLocations = updatedLocations
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = true
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    // Drop Off Location for this child
+                    if (index < childLocations.size) {
+                        LocationAutocompleteField(
+                            value = childLocations[index].dropOffLocation,
+                            onValueChange = { newValue ->
+                                val updatedLocations = childLocations.toMutableList()
+                                updatedLocations[index] = updatedLocations[index].copy(
+                                    dropOffLocation = newValue,
+                                    dropOffError = false,
+                                    hasTouchedDropOff = true,
+                                    dropOffPlaceId = "",
+                                    dropOffLatLng = null
+                                )
+                                childLocations = updatedLocations
+                            },
+                            placeholder = "Select drop off location",
+                            isError = childLocations[index].dropOffError,
+                            onLocationSelected = { placeId, address, lat, lng ->
+                                val updatedLocations = childLocations.toMutableList()
+                                updatedLocations[index] = updatedLocations[index].copy(
+                                    dropOffLocation = TextFieldValue(address),
+                                    dropOffPlaceId = placeId,
+                                    dropOffLatLng = Pair(lat, lng),
+                                    dropOffError = false
+                                )
+                                childLocations = updatedLocations
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = true
+                        )
+                    }
 
                     // "+ Add" button below, aligned to end
                     if (index == childrenNames.lastIndex) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 2.dp, bottom = 0.dp),
+                                .padding(top = 8.dp, bottom = 0.dp),
                             horizontalArrangement = Arrangement.End
                         ) {
                             TextButton(
@@ -588,17 +958,14 @@ fun SignupScreen(
 
                     // Spacer between child sections
                     if (index < childrenNames.lastIndex) {
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }
         }
-
-
         Spacer(modifier = Modifier.height(16.dp))
 
         // Email
-
 
         OutlinedTextField(
             value = email,
@@ -634,7 +1001,7 @@ fun SignupScreen(
                                 .matches()
                     }
                 },
-            textStyle = TextStyle(fontSize = 16.sp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             shape = RoundedCornerShape(12.dp),
             isError = emailError,
             enabled = true
@@ -683,6 +1050,24 @@ fun SignupScreen(
                 childErrors = childrenNames.map { it.text.isBlank() }
                 val hasEmptyChild = childErrors.any { it }
 
+                // Location validation for all children
+                var hasAnyLocationError = false
+                val updatedLocations = childLocations.toMutableList()
+                childLocations.forEachIndexed { idx, location ->
+                    val pickUpEmpty = location.pickUpLocation.text.isBlank()
+                    val dropOffEmpty = location.dropOffLocation.text.isBlank()
+                    if (pickUpEmpty || dropOffEmpty) {
+                        hasAnyLocationError = true
+                    }
+                    updatedLocations[idx] = location.copy(
+                        pickUpError = pickUpEmpty,
+                        dropOffError = dropOffEmpty,
+                        hasTouchedPickUp = true,
+                        hasTouchedDropOff = true
+                    )
+                }
+                childLocations = updatedLocations
+
                 hasTouchedEmail = true
                 emailError =
                     email.text.isBlank() || !Patterns.EMAIL_ADDRESS.matcher(email.text).matches()
@@ -695,8 +1080,7 @@ fun SignupScreen(
                 )
                 Log.d("EMAIL_DEBUG", "emailError: $emailError")
 
-                val isFormValid = !parentError && !hasEmptyChild && !emailError
-
+                val isFormValid = !parentError && !hasEmptyChild && !hasAnyLocationError && !emailError
                 if (isFormValid) {
                     val prefs = context.getSharedPreferences("pending_signup", Context.MODE_PRIVATE)
                     prefs.edit().apply {
@@ -705,6 +1089,11 @@ fun SignupScreen(
                         // Save children names
                         val childrenList = childrenNames.map { it.text }.joinToString("|||")
                         putString("pending_children", childrenList)
+                        // Save locations for each child
+                        val locationsList = childLocations.joinToString("|||") { location ->
+                            "${location.pickUpLocation.text}|${location.dropOffLocation.text}|${location.pickUpPlaceId}|${location.dropOffPlaceId}|${location.pickUpLatLng?.first ?: 0.0}|${location.pickUpLatLng?.second ?: 0.0}|${location.dropOffLatLng?.first ?: 0.0}|${location.dropOffLatLng?.second ?: 0.0}"
+                        }
+                        putString("pending_locations", locationsList)
                         putBoolean("pending_verification", true)
                         apply()
                     }
@@ -1110,6 +1499,24 @@ fun SignupScreen(
                             val hasEmptyChild = childErrors.any { it }
                             studentError = hasEmptyChild
 
+                            // Location validation for all children
+                            var hasAnyLocationError = false
+                            val updatedLocations = childLocations.toMutableList()
+                            childLocations.forEachIndexed { idx, location ->
+                                val pickUpEmpty = location.pickUpLocation.text.isEmpty()
+                                val dropOffEmpty = location.dropOffLocation.text.isEmpty()
+                                if (pickUpEmpty || dropOffEmpty) {
+                                    hasAnyLocationError = true
+                                }
+                                updatedLocations[idx] = location.copy(
+                                    pickUpError = pickUpEmpty,
+                                    dropOffError = dropOffEmpty,
+                                    hasTouchedPickUp = true,
+                                    hasTouchedDropOff = true
+                                )
+                            }
+                            childLocations = updatedLocations
+
                             hasTouchedEmail = true
                             emailError =
                                 email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
@@ -1140,8 +1547,7 @@ fun SignupScreen(
                             }
                             // --- Step 6: Overall validity check ---
                             val canProceed =
-                                !parentError && !hasEmptyChild && !emailError && !phoneNotAllowed
-
+                                !parentError && !hasEmptyChild && !hasAnyLocationError && !emailError && !phoneNotAllowed
                             if (canProceed) {
                                 // --- Step 7: Request OTP (only once) ---
                                 signupViewModel.requestOtp()
@@ -1164,7 +1570,9 @@ fun SignupScreen(
                                         val firstEmpty = childErrors.indexOfFirst { it }
                                         if (firstEmpty >= 0) studentFocusRequester.requestFocus()
                                     }
-
+                                    childLocations.any { it.pickUpError || it.dropOffError } -> {
+                                        // Focus will be handled by the LocationAutocompleteField for the first child with error
+                                    }
                                     emailError -> emailFocusRequester.requestFocus()
                                     phoneNotAllowed -> phoneFocusRequester.requestFocus()
                                 }
@@ -1273,13 +1681,13 @@ fun SignupScreen(
 
         val isFormValid = parentName.text.isNotEmpty() &&
                 childrenNames.all { it.text.isNotEmpty() } &&
+                childLocations.all { it.pickUpLocation.text.isNotEmpty() && it.dropOffLocation.text.isNotEmpty() } &&
                 email.text.isNotEmpty() &&
                 Patterns.EMAIL_ADDRESS.matcher(email.text).matches() &&
                 phoneErrorText.isEmpty() &&        // <-- use local phone validation
                 uiState.otpDigits.size == Constants.OTP_LENGTH &&
                 uiState.otpDigits.all { it.isNotBlank() } &&
                 isOtpValid                               // OTP is correct
-
         Button(
             onClick = {
                 scope.launch {
@@ -1329,12 +1737,30 @@ fun SignupScreen(
                         childrenNames.indices.map { index -> childrenNames[index].text.isEmpty() }
                     val hasEmptyChild = childErrors.any { it }
                     studentError = hasEmptyChild
+
+                    // Location validation for all children
+                    var hasAnyLocationError = false
+                    val updatedLocations = childLocations.toMutableList()
+                    childLocations.forEachIndexed { idx, location ->
+                        val pickUpEmpty = location.pickUpLocation.text.isEmpty()
+                        val dropOffEmpty = location.dropOffLocation.text.isEmpty()
+                        if (pickUpEmpty || dropOffEmpty) {
+                            hasAnyLocationError = true
+                        }
+                        updatedLocations[idx] = location.copy(
+                            pickUpError = pickUpEmpty,
+                            dropOffError = dropOffEmpty,
+                            hasTouchedPickUp = true,
+                            hasTouchedDropOff = true
+                        )
+                    }
+                    childLocations = updatedLocations
+
                     hasTouchedEmail = true
                     emailError = email.text.isEmpty() || !Patterns.EMAIL_ADDRESS.matcher(email.text)
                         .matches()
 
-                    val canProceed = !parentError && !hasEmptyChild && !emailError
-
+                    val canProceed = !parentError && !hasEmptyChild && !hasAnyLocationError && !emailError
                     if (canProceed) {
                         Log.d("🔥", "Continue clicked - saving parent & children in Firebase")
 
@@ -1357,88 +1783,109 @@ fun SignupScreen(
                             "active" to true
                         )
 
+                        // Add child names to parent document
+                        if (childrenNames.size == 1) {
+                            updateData["childName"] = childrenNames[0].text.trim()
+                        } else {
+                            childrenNames.forEachIndexed { index, childField ->
+                                updateData["childName${index + 1}"] = childField.text.trim()
+                            }
+                        }
+
                         firestore.collection("parents")
                             .document(normalizedPhone)
                             .set(updateData, SetOptions.merge())
                             .addOnSuccessListener {
                                 Log.d("🔥", "Parent extra fields merged in Firestore")
 
+                                // 🔥 SAVE EACH CHILD WITH THEIR OWN LOCATIONS TO FIRESTORE
+                                childrenNames.forEachIndexed { childIndex, childNameField ->
+                                    if (childNameField.text.isBlank()) return@forEachIndexed
+                                    val childLocation = childLocations[childIndex]
 
-                                // 🔥 SAVE TO CHILDREN COLLECTION IN FIRESTORE
-                                firestore.collection("parents")
-                                    .document(normalizedPhone)
-                                    .get()
-                                    .addOnSuccessListener { parentDoc ->
-                                        val schoolName = parentDoc.getString("school") ?: ""
+                                    firestore.collection("parents")
+                                        .document(normalizedPhone)
+                                        .get()
+                                        .addOnSuccessListener { parentDoc ->
+                                            val schoolName = parentDoc.getString("school") ?: ""
 
-                                        val childData = mutableMapOf<String, Any>(
-                                            "parentName" to parentName.text.trim(),
-                                            "schoolName" to schoolName,
-                                            "createdOn" to createdOn,
-                                            "createdAt" to createdTime
-                                        )
+                                            val childData = mutableMapOf<String, Any>(
+                                                "parentName" to parentName.text.trim(),
+                                                "schoolName" to schoolName,
+                                                "createdOn" to createdOn,
+                                                "createdAt" to createdTime,
+                                                "childName" to childNameField.text.trim(),
+                                                "photoUrl" to "",
+                                                "pickUpAddress" to childLocation.pickUpLocation.text.trim(),
+                                                "pickUpPlaceId" to childLocation.pickUpPlaceId,
+                                                "pickUpLat" to (childLocation.pickUpLatLng?.first ?: 0.0),
+                                                "pickUpLng" to (childLocation.pickUpLatLng?.second ?: 0.0),
+                                                "dropOffAddress" to childLocation.dropOffLocation.text.trim(),
+                                                "dropOffPlaceId" to childLocation.dropOffPlaceId,
+                                                "dropOffLat" to (childLocation.dropOffLatLng?.first ?: 0.0),
+                                                "dropOffLng" to (childLocation.dropOffLatLng?.second ?: 0.0)
+                                            )
 
-                                        if (childrenNames.size == 1) {
-                                            // Only one child - use childName (no number)
-                                            childData["childName"] = childrenNames[0].text.trim()
-                                        } else {
-                                            // Multiple children - use childName1, childName2, etc.
-                                            childrenNames.forEachIndexed { index, childField ->
-                                                childData["childName${index + 1}"] = childField.text.trim()
-                                            }
-                                        }
-
-                                        // Format child name(s) for document ID
-                                        fun formatChildName(fullName: String): String {
-                                            val parts = fullName.trim().split(" ")
-                                            return when (parts.size) {
-                                                1 -> parts[0] // Only first name
-                                                2 -> "${parts[0]} ${parts[1].first()}" // First name + last initial
-                                                else -> {
-                                                    val firstName = parts[0]
-                                                    val middleInitial = parts[1].first()
-                                                    val lastInitial = parts.last().first()
-                                                    "$firstName $middleInitial.$lastInitial"
+                                            // Format child name for document ID
+                                            fun formatChildName(fullName: String): String {
+                                                if (fullName.isBlank()) return "Unknown"
+                                                val parts = fullName.trim().split(" ")
+                                                return when (parts.size) {
+                                                    1 -> parts[0]
+                                                    2 -> {
+                                                        val lastInitial = if (parts[1].isNotEmpty()) parts[1].first().toString() else ""
+                                                        "${parts[0]} $lastInitial"
+                                                    }
+                                                    else -> {
+                                                        val firstName = parts[0]
+                                                        val middleInitial = if (parts[1].isNotEmpty()) parts[1].first().toString() else ""
+                                                        val lastInitial = if (parts.last().isNotEmpty()) parts.last().first().toString() else ""
+                                                        "$firstName $middleInitial.$lastInitial"
+                                                    }
                                                 }
                                             }
+
+                                            val formattedName = formatChildName(childNameField.text.trim())
+                                            val lastThreeDigits = normalizedPhone.takeLast(3)
+                                            val childDocId = "$formattedName-$lastThreeDigits-${childIndex + 1}"
+
+                                            firestore.collection("children")
+                                                .document(childDocId)
+                                                .set(childData)
+                                                .addOnSuccessListener {
+                                                    Log.d("🔥", "Child $formattedName saved to Firestore with locations")
+                                                }
+                                                .addOnFailureListener { e ->
+                                                    Log.e("🔥", "Failed to save child to Firestore", e)
+                                                }
                                         }
-
-                                        val childId = if (childrenNames.size == 1) {
-                                            formatChildName(childrenNames[0].text.trim())
-                                        } else {
-                                            childrenNames.joinToString(" - ") { formatChildName(it.text.trim()) }
+                                        .addOnFailureListener { e ->
+                                            Log.e("🔥", "Failed to get parent document", e)
                                         }
-
-                                        // Add parent phone number to ensure uniqueness
-                                        // Get last 3 digits of phone number
-                                        val lastThreeDigits = normalizedPhone.takeLast(3)
-                                        val childDocId = "$childId-$lastThreeDigits"
-
-                                        firestore.collection("children")
-                                            .document(childDocId)
-                                            .set(childData)
-                                            .addOnSuccessListener {
-                                                Log.d("🔥", "Child document created successfully in Firestore: $childDocId")
-                                            }
-                                            .addOnFailureListener { e ->
-                                                Log.e("🔥", "Failed to create child document in Firestore", e)
-                                            }
-                                    }
-                                    .addOnFailureListener { e ->
-                                        Log.e("🔥", "Failed to get parent document for school name", e)
-                                    }
+                                }
                             }
                             .addOnFailureListener { e ->
                                 Log.e("🔥", "Failed to merge parent fields", e)
                             }
+
                         val childrenCsv = childrenNames.joinToString(",") { it.text }
 
-                        parentSignupViewModel.saveParentAndChildren(
-                            parentName = parentName.text,
-                            childrenNames = childrenCsv,
-                            context = context
-                        )
-
+                        // Save each child with their locations to Realtime Database via ViewModel
+                        childLocations.forEachIndexed { index, location ->
+                            parentSignupViewModel.saveParentAndChildren(
+                                parentName = parentName.text,
+                                childrenNames = childrenNames[index].text,
+                                context = context,
+                                pickUpAddress = location.pickUpLocation.text.trim(),
+                                pickUpPlaceId = location.pickUpPlaceId,
+                                pickUpLat = location.pickUpLatLng?.first ?: 0.0,
+                                pickUpLng = location.pickUpLatLng?.second ?: 0.0,
+                                dropOffAddress = location.dropOffLocation.text.trim(),
+                                dropOffPlaceId = location.dropOffPlaceId,
+                                dropOffLat = location.dropOffLatLng?.first ?: 0.0,
+                                dropOffLng = location.dropOffLatLng?.second ?: 0.0
+                            )
+                        }
                         val prefs = context.getSharedPreferences("user_prefs", Context.MODE_PRIVATE)
                         prefs.edit().apply {
                             putString("parent_name", parentName.text)
@@ -1467,7 +1914,9 @@ fun SignupScreen(
                                 val firstEmpty = childErrors.indexOfFirst { it }
                                 if (firstEmpty >= 0) studentFocusRequester.requestFocus()
                             }
-
+                            childLocations.any { it.pickUpError || it.dropOffError } -> {
+                                // Focus will be handled by the LocationAutocompleteField for the first child with error
+                            }
                             emailError -> emailFocusRequester.requestFocus()
                         }
                     }

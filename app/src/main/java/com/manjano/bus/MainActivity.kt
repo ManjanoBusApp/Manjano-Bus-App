@@ -65,6 +65,8 @@ class MainActivity : FragmentActivity() {
         fun shouldNavigateToSignin(): Boolean = _navigateToSignin.value
     }
 
+    private var activeStatusListener: com.google.firebase.firestore.ListenerRegistration? = null
+
     private fun checkUserActiveStatus() {
         val prefs = getSharedPreferences("user_session", Context.MODE_PRIVATE)
         val userRole = prefs.getString("user_role", null)
@@ -72,32 +74,40 @@ class MainActivity : FragmentActivity() {
 
         Log.d("🔥", "checkUserActiveStatus - role: $userRole, phone: $userPhone")
 
+        // Remove any existing listener
+        activeStatusListener?.remove()
+
         if (userRole != null && userPhone != null) {
             val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
             val collectionName = if (userRole == "driver") "drivers" else "parents"
 
-            Log.d("🔥", "Querying $collectionName for mobileNumber: $userPhone")
+            Log.d("🔥", "Setting up real-time listener for $collectionName with mobileNumber: $userPhone")
 
-            db.collection(collectionName)
+            // Set up a real-time listener instead of a one-time get
+            activeStatusListener = db.collection(collectionName)
                 .whereEqualTo("mobileNumber", userPhone)
                 .limit(1)
-                .get()
-                .addOnSuccessListener { documents ->
-                    Log.d("🔥", "Found ${documents.size()} documents")
-                    val doc = documents.documents.firstOrNull()
+                .addSnapshotListener { snapshot, error ->
+                    if (error != null) {
+                        Log.e("🔥", "Error listening to active status", error)
+                        return@addSnapshotListener
+                    }
+
+                    val doc = snapshot?.documents?.firstOrNull()
                     if (doc != null) {
                         val isActive = doc.getBoolean("active") ?: true
-                        Log.d("🔥", "Document found, active: $isActive")
-                        if (!isActive) {
-                            Log.d("🔥", "User deactivated - signing out")
+                        Log.d("🔥", "Real-time update - active: $isActive")
 
-                            // 🔥 Save the user's role before clearing session
+                        if (!isActive) {
+                            Log.d("🔥", "User deactivated in real-time - signing out")
+
+                            // Save the user's role before clearing session
                             val deactivatedRole = userRole
 
                             prefs.edit().clear().apply()
                             clearVerification()
 
-                            // 🔥 Store the role so we know which sign-in screen to show
+                            // Store the role so we know which sign-in screen to show
                             _deactivatedUserRole.value = deactivatedRole
 
                             val intent = Intent(this, MainActivity::class.java)
@@ -109,12 +119,15 @@ class MainActivity : FragmentActivity() {
                         Log.d("🔥", "No document found for phone: $userPhone")
                     }
                 }
-                .addOnFailureListener { e ->
-                    Log.e("🔥", "Failed to check user active status", e)
-                }
         } else {
             Log.d("🔥", "No active session found")
         }
+    }
+
+
+    override fun onDestroy() {
+        super.onDestroy()
+        activeStatusListener?.remove()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

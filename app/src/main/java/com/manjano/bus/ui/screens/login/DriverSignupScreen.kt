@@ -193,7 +193,7 @@ fun DriverSignupScreen(
                         driverError = true
                     }
                 },
-            textStyle = TextStyle(fontSize = 16.sp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             shape = RoundedCornerShape(12.dp),
             isError = driverError,
             colors = OutlinedTextFieldDefaults.colors(
@@ -238,7 +238,7 @@ fun DriverSignupScreen(
                         idError = true
                     }
                 },
-            textStyle = TextStyle(fontSize = 16.sp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             shape = RoundedCornerShape(12.dp),
             isError = idError,
             colors = OutlinedTextFieldDefaults.colors(
@@ -284,7 +284,7 @@ fun DriverSignupScreen(
                         schoolError = true
                     }
                 },
-            textStyle = TextStyle(fontSize = 16.sp),
+            textStyle = TextStyle(fontSize = 16.sp, color = Color.Black),
             shape = RoundedCornerShape(12.dp),
             isError = schoolError,
             colors = OutlinedTextFieldDefaults.colors(

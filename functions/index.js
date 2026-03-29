@@ -1,5 +1,7 @@
 const { onCall } = require("firebase-functions/v2/https");
+const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { logger } = require("firebase-functions/v2");
+const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
 const admin = require('firebase-admin');
 const nodemailer = require("nodemailer");
 const crypto = require('crypto');
@@ -328,7 +330,6 @@ exports.verifyEmail = onCall(async (request) => {
 });
 
 // ==================== FUNCTION 4: CLEAN UP EXPIRED TOKENS ====================
-const { onSchedule } = require("firebase-functions/v2/scheduler");
 
 exports.cleanupExpiredTokens = onSchedule("every 60 minutes", async (event) => {
     const now = Date.now();
@@ -451,5 +452,219 @@ exports.addActiveFieldToAllDrivers = onCall(async (request) => {
 
     await batch.commit();
     logger.info(`✅ Added active:true to ${updatedCount} driver documents`);
+    return { success: true, updatedCount: updatedCount };
+});
+
+// ==================== FUNCTION 7: SYNC PARENT ACTIVE STATUS TO REALTIME DATABASE (v2) ====================
+exports.syncParentActiveStatus = onDocumentUpdated("parents/{parentId}", async (event) => {
+    const beforeData = event.data.before.data();
+    const afterData = event.data.after.data();
+
+    const beforeActive = beforeData.active;
+    const afterActive = afterData.active;
+
+    // Only proceed if active status actually changed
+    if (beforeActive === afterActive) {
+        logger.info('Active status unchanged, skipping');
+        return null;
+    }
+
+    const parentName = afterData.parentName || '';
+    const parentPhone = event.params.parentId;
+
+    logger.info(`Parent ${parentName} (${parentPhone}) active status changed: ${beforeActive} → ${afterActive}`);
+
+    // Collect children names from parent document
+    const childrenNames = [];
+
+    // Case 1: Single child (stored as 'childName')
+    const singleChild = afterData.childName;
+    if (singleChild && singleChild.trim() !== '') {
+        childrenNames.push(singleChild.trim());
+    }
+
+    // Case 2: Multiple children (stored as 'childName1', 'childName2', etc.)
+    for (let i = 1; i <= 10; i++) {
+        const childName = afterData[`childName${i}`];
+        if (childName && childName.trim() !== '') {
+            childrenNames.push(childName.trim());
+        }
+    }
+
+    if (childrenNames.length === 0) {
+        logger.info('No children found for this parent in parent document');
+        return null;
+    }
+
+    logger.info(`Found ${childrenNames.length} children: ${childrenNames.join(', ')}`);
+
+    const db = admin.database();
+    const firestore = admin.firestore();
+
+    // Process each child
+    for (const childName of childrenNames) {
+        const childKey = childName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+        if (afterActive === true) {
+            logger.info(`Reactivating child: ${childName} (${childKey})`);
+
+            // Get child data from children collection
+            const childrenCollection = firestore.collection('children');
+            const querySnapshot = await childrenCollection
+                .where('childName', '==', childName)
+                .where('parentName', '==', parentName)
+                .limit(1)
+                .get();
+
+            if (!querySnapshot.empty) {
+                const childDoc = querySnapshot.docs[0];
+                const childData = childDoc.data();
+
+                const rtdbData = {
+                    active: true,
+                    childId: childKey,
+                    displayName: childName,
+                    eta: childData.eta || 'Arriving in 5 minutes',
+                    parentName: parentName,
+                    photoUrl: childData.photoUrl || '',
+                    status: childData.status || 'On Route',
+                    pickUpAddress: childData.pickUpAddress || '',
+                    pickUpPlaceId: childData.pickUpPlaceId || '',
+                    pickUpLat: childData.pickUpLat || 0,
+                    pickUpLng: childData.pickUpLng || 0,
+                    dropOffAddress: childData.dropOffAddress || '',
+                    dropOffPlaceId: childData.dropOffPlaceId || '',
+                    dropOffLat: childData.dropOffLat || 0,
+                    dropOffLng: childData.dropOffLng || 0
+                };
+
+                await db.ref(`students/${childKey}`).set(rtdbData);
+
+                const parentKey = parentName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                await db.ref(`parents/${parentKey}/children/${childKey}`).set(rtdbData);
+
+                logger.info(`✅ Child ${childName} reactivated`);
+            } else {
+                logger.info(`⚠️ No Firestore data found for child ${childName}`);
+            }
+
+        } else {
+            logger.info(`Deactivating child: ${childName} (${childKey})`);
+
+            await db.ref(`students/${childKey}`).remove();
+
+            const parentKey = parentName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            await db.ref(`parents/${parentKey}/children/${childKey}`).remove();
+
+            logger.info(`✅ Child ${childName} removed`);
+        }
+    }
+
+    const parentKey = parentName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    await db.ref(`parents/${parentKey}/active`).set(afterActive);
+
+    logger.info(`✅ Parent ${parentName} sync complete`);
+    return null;
+});
+
+
+// ==================== FUNCTION 8: SYNC NEW PARENT TO REALTIME DATABASE (v2) ====================
+exports.syncNewParent = onDocumentCreated("parents/{parentId}", async (event) => {
+    const data = event.data.data();
+    const parentName = data.parentName || '';
+    const parentPhone = event.params.parentId;
+
+    logger.info(`New parent created: ${parentName} (${parentPhone})`);
+
+    if (data.active !== false) {
+        // Collect children names from parent document
+        const childrenNames = [];
+
+        // Case 1: Single child
+        const singleChild = data.childName;
+        if (singleChild && singleChild.trim() !== '') {
+            childrenNames.push(singleChild.trim());
+        }
+
+        // Case 2: Multiple children
+        for (let i = 1; i <= 10; i++) {
+            const childName = data[`childName${i}`];
+            if (childName && childName.trim() !== '') {
+                childrenNames.push(childName.trim());
+            }
+        }
+
+        if (childrenNames.length === 0) {
+            logger.info('No children found for new parent in parent document');
+            return null;
+        }
+
+        const db = admin.database();
+        const firestore = admin.firestore();
+        const parentKey = parentName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+        for (const childName of childrenNames) {
+            const childKey = childName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+
+            // Get child data from children collection
+            const childDoc = await firestore.collection('children')
+                .where('childName', '==', childName)
+                .where('parentName', '==', parentName)
+                .limit(1)
+                .get();
+
+            const childData = childDoc.empty ? {} : childDoc.docs[0].data();
+
+            const rtdbData = {
+                active: true,
+                childId: childKey,
+                displayName: childName,
+                eta: 'Arriving in 5 minutes',
+                parentName: parentName,
+                photoUrl: '',
+                status: 'On Route',
+                pickUpAddress: childData.pickUpAddress || '',
+                pickUpPlaceId: childData.pickUpPlaceId || '',
+                pickUpLat: childData.pickUpLat || 0,
+                pickUpLng: childData.pickUpLng || 0,
+                dropOffAddress: childData.dropOffAddress || '',
+                dropOffPlaceId: childData.dropOffPlaceId || '',
+                dropOffLat: childData.dropOffLat || 0,
+                dropOffLng: childData.dropOffLng || 0
+            };
+
+            await db.ref(`students/${childKey}`).set(rtdbData);
+            await db.ref(`parents/${parentKey}/children/${childKey}`).set(rtdbData);
+
+            logger.info(`✅ Child ${childName} synced`);
+        }
+
+        await db.ref(`parents/${parentKey}/active`).set(true);
+        logger.info(`✅ New parent ${parentName} synced`);
+    } else {
+        logger.info(`New parent ${parentName} is inactive, skipping sync`);
+    }
+
+    return null;
+});
+
+// ==================== FUNCTION 9: MIGRATE EXISTING CHILDREN - ADD PHOTOURL FIELD ====================
+exports.migrateChildrenAddPhotoUrl = onCall(async (request) => {
+    const childrenRef = admin.firestore().collection('children');
+    const snapshot = await childrenRef.get();
+
+    let updatedCount = 0;
+    const batch = admin.firestore().batch();
+
+    snapshot.forEach(doc => {
+        const data = doc.data();
+        if (!data.hasOwnProperty('photoUrl')) {
+            batch.update(doc.ref, { photoUrl: '' });
+            updatedCount++;
+        }
+    });
+
+    await batch.commit();
+    logger.info(`✅ Added photoUrl field to ${updatedCount} children`);
     return { success: true, updatedCount: updatedCount };
 });

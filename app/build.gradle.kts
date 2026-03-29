@@ -126,4 +126,6 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.7.3")
 
+    // Google Places (for autocomplete)
+    implementation("com.google.android.libraries.places:places:3.3.0")
 }

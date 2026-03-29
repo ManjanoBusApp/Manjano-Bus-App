@@ -41,10 +41,18 @@ class ParentSignupViewModel : ViewModel() {
         return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
                 capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
     }
-        fun saveParentAndChildren(
+    fun saveParentAndChildren(
         parentName: String,
         childrenNames: String,
-        context: Context
+        context: Context,
+        pickUpAddress: String = "",
+        pickUpPlaceId: String = "",
+        pickUpLat: Double = 0.0,
+        pickUpLng: Double = 0.0,
+        dropOffAddress: String = "",
+        dropOffPlaceId: String = "",
+        dropOffLat: Double = 0.0,
+        dropOffLng: Double = 0.0
     ) {
 
         Log.d("🔥", "ParentSignupViewModel save called")
@@ -53,6 +61,8 @@ class ParentSignupViewModel : ViewModel() {
             Log.e("🔥", "No network connection")
             return
         }
+
+
 
         fun normalizeName(name: String): String =
             name.lowercase().replace(Regex("[^a-z0-9]"), "")
@@ -139,7 +149,15 @@ class ParentSignupViewModel : ViewModel() {
                                     "eta" to "Arriving in 5 minutes",
                                     "parentName" to parentName,
                                     "photoUrl" to finalPhotoUrl,
-                                    "status" to "On Route"
+                                    "status" to "On Route",
+                                    "pickUpAddress" to pickUpAddress,
+                                    "pickUpPlaceId" to pickUpPlaceId,
+                                    "pickUpLat" to pickUpLat,
+                                    "pickUpLng" to pickUpLng,
+                                    "dropOffAddress" to dropOffAddress,
+                                    "dropOffPlaceId" to dropOffPlaceId,
+                                    "dropOffLat" to dropOffLat,
+                                    "dropOffLng" to dropOffLng
                                 )
 
                                 val updates = hashMapOf<String, Any>(
