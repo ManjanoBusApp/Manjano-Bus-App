@@ -66,7 +66,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.hilt.navigation.compose.hiltViewModel
-
+import androidx.activity.compose.BackHandler
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
@@ -74,6 +74,13 @@ fun DriverDashboardScreen(
     navController: NavHostController,
     driverPhoneNumber: String
 ) {
+
+    BackHandler {
+        navController.navigate("welcome") {
+            popUpTo(0) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
     val viewModel: DriverDashboardViewModel = hiltViewModel()
 
     // Set the logged-in driver phone number once

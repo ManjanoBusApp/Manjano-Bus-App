@@ -2,9 +2,12 @@ const { onCall } = require("firebase-functions/v2/https");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { logger } = require("firebase-functions/v2");
 const { onDocumentCreated, onDocumentUpdated } = require("firebase-functions/v2/firestore");
+const { onObjectFinalized } = require("firebase-functions/v2/storage");
 const admin = require('firebase-admin');
 const nodemailer = require("nodemailer");
 const crypto = require('crypto');
+
+
 
 admin.initializeApp();
 
@@ -474,6 +477,52 @@ exports.syncParentActiveStatus = onDocumentUpdated("parents/{parentId}", async (
 
     logger.info(`Parent ${parentName} (${parentPhone}) active status changed: ${beforeActive} → ${afterActive}`);
 
+    // Helper function to get image URL from Firebase Storage
+   async function getChildImageUrl(childKey) {
+       try {
+           const bucket = admin.storage().bucket();
+
+           // Pattern 1: With underscores (original behavior)
+           const withUnderscores = childKey;
+
+           // Pattern 2: Without underscores (remove underscores)
+           const withoutUnderscores = childKey.replace(/_/g, '');
+
+           const extensions = ['png', 'jpg'];
+
+           for (const ext of extensions) {
+               // Try with underscores
+               const pathWithUnderscores = `Children Images/${withUnderscores}.${ext}`;
+               const fileWithUnderscores = bucket.file(pathWithUnderscores);
+               const [existsWithUnderscores] = await fileWithUnderscores.exists();
+
+               if (existsWithUnderscores) {
+                   const encodedFileName = encodeURIComponent(`${withUnderscores}.${ext}`);
+                   const url = `https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F${encodedFileName}?alt=media`;
+                   logger.info(`✅ Found image (with underscores) for ${childKey} as ${withUnderscores}.${ext}`);
+                   return url;
+               }
+
+               // Try without underscores
+               const pathWithoutUnderscores = `Children Images/${withoutUnderscores}.${ext}`;
+               const fileWithoutUnderscores = bucket.file(pathWithoutUnderscores);
+               const [existsWithoutUnderscores] = await fileWithoutUnderscores.exists();
+
+               if (existsWithoutUnderscores) {
+                   const encodedFileName = encodeURIComponent(`${withoutUnderscores}.${ext}`);
+                   const url = `https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F${encodedFileName}?alt=media`;
+                   logger.info(`✅ Found image (without underscores) for ${childKey} as ${withoutUnderscores}.${ext}`);
+                   return url;
+               }
+           }
+
+           logger.info(`⚠️ No image found in Storage for ${childKey} (tried with and without underscores, .png and .jpg)`);
+           return '';
+       } catch (error) {
+           logger.info(`Error checking Storage for ${childKey}: ${error.message}`);
+           return '';
+       }
+   }
     // Collect children names from parent document
     const childrenNames = [];
 
@@ -520,13 +569,17 @@ exports.syncParentActiveStatus = onDocumentUpdated("parents/{parentId}", async (
                 const childDoc = querySnapshot.docs[0];
                 const childData = childDoc.data();
 
+                // Try to get image URL from Storage
+                const imageUrl = await getChildImageUrl(childKey);
+                const finalPhotoUrl = imageUrl || '';
+
                 const rtdbData = {
                     active: true,
                     childId: childKey,
                     displayName: childName,
                     eta: childData.eta || 'Arriving in 5 minutes',
                     parentName: parentName,
-                    photoUrl: childData.photoUrl || '',
+                    photoUrl: finalPhotoUrl,
                     status: childData.status || 'On Route',
                     pickUpAddress: childData.pickUpAddress || '',
                     pickUpPlaceId: childData.pickUpPlaceId || '',
@@ -543,7 +596,7 @@ exports.syncParentActiveStatus = onDocumentUpdated("parents/{parentId}", async (
                 const parentKey = parentName.toLowerCase().replace(/[^a-z0-9]/g, '_');
                 await db.ref(`parents/${parentKey}/children/${childKey}`).set(rtdbData);
 
-                logger.info(`✅ Child ${childName} reactivated`);
+                logger.info(`✅ Child ${childName} reactivated with image: ${finalPhotoUrl ? 'YES' : 'NO'}`);
             } else {
                 logger.info(`⚠️ No Firestore data found for child ${childName}`);
             }
@@ -566,7 +619,6 @@ exports.syncParentActiveStatus = onDocumentUpdated("parents/{parentId}", async (
     logger.info(`✅ Parent ${parentName} sync complete`);
     return null;
 });
-
 
 // ==================== FUNCTION 8: SYNC NEW PARENT TO REALTIME DATABASE (v2) ====================
 exports.syncNewParent = onDocumentCreated("parents/{parentId}", async (event) => {
@@ -667,4 +719,56 @@ exports.migrateChildrenAddPhotoUrl = onCall(async (request) => {
     await batch.commit();
     logger.info(`✅ Added photoUrl field to ${updatedCount} children`);
     return { success: true, updatedCount: updatedCount };
+});
+
+// ==================== FUNCTION 10: AUTO UPDATE CHILD IMAGE WHEN UPLOADED TO STORAGE ====================
+exports.onChildImageUploaded = onObjectFinalized({
+    bucket: "manjano-bus.firebasestorage.app",
+    object: "Children Images/*.{png,jpg}"
+}, async (event) => {
+    const filePath = event.data.name;
+    const fileName = filePath.split('/').pop();
+
+    // Extract child key from filename (remove extension, keep as-is without converting underscores)
+    let childKey = fileName.replace(/\.(png|jpg)$/i, '').toLowerCase();
+    // Also create a version without underscores for matching
+    const childKeyNoUnderscores = childKey.replace(/_/g, '');
+
+    logger.info(`📸 New image uploaded: ${filePath}`);
+    logger.info(`Child key derived (with underscores): ${childKey}`);
+    logger.info(`Child key derived (without underscores): ${childKeyNoUnderscores}`);
+
+    // Construct the public URL
+    const encodedFileName = encodeURIComponent(fileName);
+    const imageUrl = `https://firebasestorage.googleapis.com/v0/b/manjano-bus.firebasestorage.app/o/Children%20Images%2F${encodedFileName}?alt=media`;
+
+    const db = admin.database();
+
+    // Try to find the child in Realtime Database using both key patterns
+    let snapshot = await db.ref(`students/${childKey}`).once('value');
+    let actualChildKey = childKey;
+
+    if (!snapshot.exists()) {
+        // Try without underscores
+        snapshot = await db.ref(`students/${childKeyNoUnderscores}`).once('value');
+        actualChildKey = childKeyNoUnderscores;
+    }
+
+    if (snapshot.exists()) {
+        await db.ref(`students/${actualChildKey}/photoUrl`).set(imageUrl);
+        logger.info(`✅ Updated photoUrl for student ${actualChildKey} in Realtime Database`);
+
+        // Also update the parent's children node if it exists
+        const parentName = snapshot.child('parentName').val();
+        if (parentName) {
+            const parentKey = parentName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+            const parentChildRef = db.ref(`parents/${parentKey}/children/${actualChildKey}/photoUrl`);
+            await parentChildRef.set(imageUrl);
+            logger.info(`✅ Updated photoUrl in parent node for ${actualChildKey}`);
+        }
+    } else {
+        logger.info(`⚠️ Child ${childKey} (or ${childKeyNoUnderscores}) not found in Realtime Database yet. Image will be used when child is reactivated.`);
+    }
+
+    return null;
 });

@@ -38,12 +38,23 @@ import androidx.compose.ui.unit.dp
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import android.util.Log
+import androidx.activity.compose.BackHandler
+
+
+
 @Composable
 fun AdminSignInScreen(
     navController: NavController,
     viewModel: SignInViewModel,
     signUpViewModel: SignUpViewModel
 ) {
+
+    BackHandler {
+        navController.navigate("welcome") {
+            popUpTo(0) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
 
     val role = "admin"
 

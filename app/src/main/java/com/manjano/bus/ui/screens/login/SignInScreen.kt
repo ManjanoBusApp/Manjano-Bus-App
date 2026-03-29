@@ -91,7 +91,7 @@ import java.nio.charset.StandardCharsets
 import java.util.Locale
 import androidx.compose.ui.focus.onFocusChanged
 import android.util.Log
-
+import androidx.activity.compose.BackHandler
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -101,6 +101,14 @@ fun SignInScreen(
     signUpViewModel: SignUpViewModel,
     role: String
 ) {
+
+    BackHandler {
+        navController.navigate("welcome") {
+            popUpTo(0) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
+
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
 
     LaunchedEffect(role) {

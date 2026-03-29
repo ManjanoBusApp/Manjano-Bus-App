@@ -55,6 +55,7 @@ import android.content.Context
 import android.util.Log
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import androidx.activity.compose.BackHandler
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -62,6 +63,13 @@ fun AdminSignupScreen(
     navController: NavController,
     signupViewModel: SignUpViewModel = viewModel()
 ) {
+
+    BackHandler {
+        navController.navigate("welcome") {
+            popUpTo(0) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
     val appPurple = Color(0xFF800080)
     val uiState by signupViewModel.uiState.collectAsState()
 

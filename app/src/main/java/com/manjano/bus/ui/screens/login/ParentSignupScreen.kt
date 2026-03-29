@@ -107,7 +107,7 @@ import androidx.compose.runtime.collectAsState
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
-
+import androidx.activity.compose.BackHandler
 
 
 data class MailboxLayerResult(
@@ -214,6 +214,7 @@ fun SignupOtpInputRow(
     focusRequester: FocusRequester,
     emailVerified: Boolean
 ) {
+
     val safeOtp =
         if (otp.size == Constants.OTP_LENGTH) otp else List(Constants.OTP_LENGTH) { "" }
     val scope = rememberCoroutineScope()
@@ -536,6 +537,14 @@ fun SignupScreen(
     navController: NavController,
     signupViewModel: SignUpViewModel = viewModel()
 ) {
+
+    BackHandler {
+        navController.navigate("welcome") {
+            popUpTo(0) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
+
     val parentSignupViewModel: ParentSignupViewModel = viewModel()
     val appPurple = Color(0xFF800080)
     val uiState by signupViewModel.uiState.collectAsState()

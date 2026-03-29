@@ -83,6 +83,7 @@ import com.google.firebase.database.ValueEventListener
 import com.google.firebase.database.DataSnapshot
 import com.google.firebase.database.DatabaseError
 import android.content.Context
+import androidx.activity.compose.BackHandler
 
 data class Child(
     val name: String = "",
@@ -101,6 +102,14 @@ fun ParentDashboardScreen(
     navBackStackEntry: androidx.navigation.NavBackStackEntry?, // <-- New parameter to retrieve args
     viewModel: ParentDashboardViewModel = hiltViewModel()
 ) {
+    val currentRoute = navBackStackEntry?.destination?.route
+
+    BackHandler(enabled = currentRoute != null) {
+        navController.navigate("welcome") {
+            popUpTo(0) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
 
     // CRITICAL FIX: Manually retrieve arguments from the NavBackStackEntry
     val parentName = navBackStackEntry?.arguments?.getString("parentName") ?: ""

@@ -22,6 +22,8 @@ import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.font.FontWeight
+import androidx.activity.compose.BackHandler
+
 
 @Composable
 fun AdminDashboardScreen(
@@ -29,6 +31,13 @@ fun AdminDashboardScreen(
     adminMobileNumber: String,
     viewModel: AdminDashboardViewModel = hiltViewModel()
 ) {
+
+    BackHandler {
+        navController.navigate("welcome") {
+            popUpTo(0) { inclusive = true }
+            launchSingleTop = true
+        }
+    }
     val loading by viewModel.loading.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
