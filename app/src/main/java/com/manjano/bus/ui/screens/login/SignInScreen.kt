@@ -133,6 +133,9 @@ fun SignInScreen(
     val isPreRegistered by viewModel.isPreRegistered.collectAsStateWithLifecycle()
     val isSignedUp by viewModel.isSignedUp.collectAsStateWithLifecycle()
 
+    // Driver active status state (only used for driver role)
+    var isDriverActive by remember { mutableStateOf<Boolean?>(null) }
+
     LaunchedEffect(uiState.navigateToDashboard) {
         if (uiState.navigateToDashboard) {
 
@@ -303,6 +306,10 @@ fun SignInScreen(
             }
             // Priority-based error display under phone field
             val displayedError = when {
+                // Driver-specific: account deactivated by admin
+                role == "driver" && isDriverActive == false -> {
+                    "Your account has been deactivated. Please contact the school administrator."
+                }
                 isPhoneAllowed == false &&
                         isPreRegistered == true &&
                         isSignedUp == false -> {
@@ -317,7 +324,6 @@ fun SignInScreen(
                 phoneErrorText.isNotEmpty() -> phoneErrorText  // keeps existing format/invalid errors
                 else -> null
             }
-
             if (displayedError != null) {
                 Text(
                     text = displayedError,
@@ -369,8 +375,45 @@ fun SignInScreen(
                             if (isPhoneAllowed != null) break
                         }
 
+                        // For drivers, also check active status
+                        if (role == "driver" && isPhoneAllowed == true) {
+                            val db = com.google.firebase.firestore.FirebaseFirestore.getInstance()
+                            val normalizedPhone = viewModel.normalizePhoneNumber(
+                                uiState.rawPhoneInput,
+                                uiState.selectedCountry.isoCode
+                            )
+
+                            db.collection("drivers")
+                                .whereEqualTo("mobileNumber", normalizedPhone)
+                                .limit(1)
+                                .get()
+                                .addOnSuccessListener { documents ->
+                                    val doc = documents.documents.firstOrNull()
+                                    if (doc != null) {
+                                        isDriverActive = doc.getBoolean("active") ?: true
+                                    } else {
+                                        isDriverActive = null
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    isDriverActive = null
+                                }
+
+                            // Wait for active status check
+                            for (i in 1..15) {
+                                delay(100)
+                                if (isDriverActive != null) break
+                            }
+                        }
+
                         // Evaluate Firestore only if we reached here (valid format)
                         when {
+                            // Driver-specific: account deactivated
+                            role == "driver" && isDriverActive == false -> {
+                                phoneErrorText = "Your account has been deactivated. Please contact the school administrator."
+                                phoneFocusRequester.requestFocus()
+                                return@launch
+                            }
                             isPhoneAllowed != true -> {
                                 when {
                                     isPreRegistered == true && isSignedUp == false -> {
@@ -384,7 +427,6 @@ fun SignInScreen(
                                 return@launch
                             }
                         }
-
                         // Success path
                         phoneErrorText = ""
                         keyboardController?.hide()

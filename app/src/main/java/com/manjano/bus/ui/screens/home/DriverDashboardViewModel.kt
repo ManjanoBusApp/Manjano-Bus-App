@@ -52,6 +52,13 @@ class DriverDashboardViewModel @Inject constructor(
     val driverFirstName: StateFlow<String> = _driverFirstName
     private val _alreadyRegisteredError = MutableStateFlow<String?>(null)
     val alreadyRegisteredError: StateFlow<String?> = _alreadyRegisteredError.asStateFlow()
+
+    // ------------------- DRIVER ACTIVE STATUS -------------------
+    private val _isDriverActive = MutableStateFlow<Boolean?>(null)
+    val isDriverActive: StateFlow<Boolean?> = _isDriverActive.asStateFlow()
+
+    private var activeStatusListener: com.google.firebase.firestore.ListenerRegistration? = null
+
     // ------------------- CURRENT LOGGED-IN DRIVER PHONE -------------------
     var loggedInDriverPhoneNumber: String? = null
         private set
@@ -59,7 +66,6 @@ class DriverDashboardViewModel @Inject constructor(
     fun setLoggedInDriverPhoneNumber(phone: String) {
         loggedInDriverPhoneNumber = if (phone.startsWith("7")) "0$phone" else phone
     }
-
     // ------------------- FETCH DRIVER NAME IN REALTIME -------------------
     fun fetchDriverNameRealtime(phoneNumber: String) {
         var normalizedPhone =
@@ -123,6 +129,30 @@ class DriverDashboardViewModel @Inject constructor(
 
                 _driverFirstName.value = firstName
                 android.util.Log.d("NameFixDebug", "State updated: driverFirstName = '$firstName'")
+
+                // Start monitoring active status after fetching driver
+                monitorDriverActiveStatus(doc.id)
+            }
+    }
+
+    // ------------------- MONITOR DRIVER ACTIVE STATUS -------------------
+    fun monitorDriverActiveStatus(driverDocumentId: String) {
+        // Remove existing listener if any
+        activeStatusListener?.remove()
+
+        activeStatusListener = firestore.collection("drivers")
+            .document(driverDocumentId)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    android.util.Log.e("DriverActiveStatus", "Error listening to active status: ${error.message}")
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null && snapshot.exists()) {
+                    val isActive = snapshot.getBoolean("active") ?: true
+                    android.util.Log.d("DriverActiveStatus", "Active status changed to: $isActive")
+                    _isDriverActive.value = isActive
+                }
             }
     }
     // ------------------- UPDATE LAST LOGIN -------------------
@@ -226,6 +256,7 @@ class DriverDashboardViewModel @Inject constructor(
         fusedLocationClient.removeLocationUpdates(locationCallback)
         tts?.stop()
         tts?.shutdown()
+        activeStatusListener?.remove()
     }
 
     // ------------------- SAVE DRIVER PROFILE (SIGNUP) -------------------
@@ -293,4 +324,5 @@ class DriverDashboardViewModel @Inject constructor(
                 android.util.Log.e("DriverDashboardVM", "Firestore query failed", e)
             }
     }
+
 }

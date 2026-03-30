@@ -93,6 +93,26 @@ fun DriverDashboardScreen(
         viewModel.fetchDriverNameRealtime(driverPhoneNumber)
     }
 
+    // Observe driver active status for auto-logout
+    val isDriverActive by viewModel.isDriverActive.collectAsState()
+    val context = LocalContext.current
+
+    // Auto-logout when admin sets active to false
+    LaunchedEffect(isDriverActive) {
+        android.util.Log.d("DriverActiveStatus", "Active status observed: $isDriverActive")
+        if (isDriverActive == false) {
+            android.util.Log.d("DriverActiveStatus", "Driver deactivated by admin - logging out")
+            // Clear any stored driver session data
+            val prefs = android.preference.PreferenceManager.getDefaultSharedPreferences(context)
+            prefs.edit().remove("driver_logged_in").apply()
+            // Navigate to welcome screen
+            navController.navigate("welcome") {
+                popUpTo(0) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+    }
+
     val locationPermissionState = rememberMultiplePermissionsState(
         listOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -134,7 +154,6 @@ fun DriverDashboardScreen(
         }
     }
 }
-
 
 
 @OptIn(ExperimentalMaterial3Api::class)
