@@ -55,13 +55,25 @@ class ParentSignupViewModel : ViewModel() {
         dropOffLng: Double = 0.0
     ) {
 
+        Log.d("🔥", "========== SAVE PARENT AND CHILDREN ==========")
+        Log.d("🔥", "Parent Name: $parentName")
+        Log.d("🔥", "Child Name: $childrenNames")
+        Log.d("🔥", "pickUpAddress: $pickUpAddress")
+        Log.d("🔥", "pickUpPlaceId: $pickUpPlaceId")
+        Log.d("🔥", "pickUpLat: $pickUpLat")
+        Log.d("🔥", "pickUpLng: $pickUpLng")
+        Log.d("🔥", "dropOffAddress: $dropOffAddress")
+        Log.d("🔥", "dropOffPlaceId: $dropOffPlaceId")
+        Log.d("🔥", "dropOffLat: $dropOffLat")
+        Log.d("🔥", "dropOffLng: $dropOffLng")
+        Log.d("🔥", "=============================================")
+
         Log.d("🔥", "ParentSignupViewModel save called")
 
         if (!isNetworkAvailable(context)) {
             Log.e("🔥", "No network connection")
             return
         }
-
 
 
         fun normalizeName(name: String): String =
@@ -160,16 +172,25 @@ class ParentSignupViewModel : ViewModel() {
                                     "dropOffLng" to dropOffLng
                                 )
 
+                                Log.d("🔥", "childData contains pickUpLat: ${childData["pickUpLat"]}")
+                                Log.d("🔥", "childData contains pickUpLng: ${childData["pickUpLng"]}")
+
+                                Log.d("🔥", "FINAL childData to write: $childData")
+
                                 val updates = hashMapOf<String, Any>(
                                     "parents/$parentKey/children/$childKey" to childData,
                                     "students/$childKey" to childData
                                 )
+
+                                Log.d("🔥", "FULL updates map: $updates")
 
                                 rootRef.updateChildren(updates).addOnSuccessListener {
                                     Log.d(
                                         "🔥",
                                         "Schema Sync Success: $childKey for Parent: $parentName"
                                     )
+                                }.addOnFailureListener { error ->
+                                    Log.e("🔥", "Schema Sync FAILED: $childKey", error)
                                 }
                             }
                         }

@@ -19,7 +19,9 @@ data class Student(
     val active: Boolean = true,
     val eta: String = "",
     val photoUrl: String = "",
-    val fingerprintId: Int? = null
+    val fingerprintId: Int? = null,
+    val pickUpLat: Double = 0.0,
+    val pickUpLng: Double = 0.0
 )
 
 @HiltViewModel

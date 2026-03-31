@@ -1801,82 +1801,85 @@ fun SignupScreen(
                             }
                         }
 
-                        firestore.collection("parents")
-                            .document(normalizedPhone)
-                            .set(updateData, SetOptions.merge())
-                            .addOnSuccessListener {
-                                Log.d("🔥", "Parent extra fields merged in Firestore")
+                        // 🔥 SAVE EACH CHILD TO FIRESTORE FIRST (BEFORE PARENT)
+                        val childSavePromises = mutableListOf<com.google.android.gms.tasks.Task<Void>>()
 
-                                // 🔥 SAVE EACH CHILD WITH THEIR OWN LOCATIONS TO FIRESTORE
-                                childrenNames.forEachIndexed { childIndex, childNameField ->
-                                    if (childNameField.text.isBlank()) return@forEachIndexed
-                                    val childLocation = childLocations[childIndex]
+                        childrenNames.forEachIndexed { childIndex, childNameField ->
+                            if (childNameField.text.isBlank()) return@forEachIndexed
+                            val childLocation = childLocations[childIndex]
 
-                                    firestore.collection("parents")
-                                        .document(normalizedPhone)
-                                        .get()
-                                        .addOnSuccessListener { parentDoc ->
-                                            val schoolName = parentDoc.getString("school") ?: ""
+                            // Get school name from parent data (will be empty for now, can be updated later)
+                            val schoolName = ""
 
-                                            val childData = mutableMapOf<String, Any>(
-                                                "parentName" to parentName.text.trim(),
-                                                "schoolName" to schoolName,
-                                                "createdOn" to createdOn,
-                                                "createdAt" to createdTime,
-                                                "childName" to childNameField.text.trim(),
-                                                "photoUrl" to "",
-                                                "pickUpAddress" to childLocation.pickUpLocation.text.trim(),
-                                                "pickUpPlaceId" to childLocation.pickUpPlaceId,
-                                                "pickUpLat" to (childLocation.pickUpLatLng?.first ?: 0.0),
-                                                "pickUpLng" to (childLocation.pickUpLatLng?.second ?: 0.0),
-                                                "dropOffAddress" to childLocation.dropOffLocation.text.trim(),
-                                                "dropOffPlaceId" to childLocation.dropOffPlaceId,
-                                                "dropOffLat" to (childLocation.dropOffLatLng?.first ?: 0.0),
-                                                "dropOffLng" to (childLocation.dropOffLatLng?.second ?: 0.0)
-                                            )
+                            val childData = mutableMapOf<String, Any>(
+                                "parentName" to parentName.text.trim(),
+                                "schoolName" to schoolName,
+                                "createdOn" to createdOn,
+                                "createdAt" to createdTime,
+                                "childName" to childNameField.text.trim(),
+                                "photoUrl" to "",
+                                "pickUpAddress" to childLocation.pickUpLocation.text.trim(),
+                                "pickUpPlaceId" to childLocation.pickUpPlaceId,
+                                "pickUpLat" to (childLocation.pickUpLatLng?.first ?: 0.0),
+                                "pickUpLng" to (childLocation.pickUpLatLng?.second ?: 0.0),
+                                "dropOffAddress" to childLocation.dropOffLocation.text.trim(),
+                                "dropOffPlaceId" to childLocation.dropOffPlaceId,
+                                "dropOffLat" to (childLocation.dropOffLatLng?.first ?: 0.0),
+                                "dropOffLng" to (childLocation.dropOffLatLng?.second ?: 0.0)
+                            )
 
-                                            // Format child name for document ID
-                                            fun formatChildName(fullName: String): String {
-                                                if (fullName.isBlank()) return "Unknown"
-                                                val parts = fullName.trim().split(" ")
-                                                return when (parts.size) {
-                                                    1 -> parts[0]
-                                                    2 -> {
-                                                        val lastInitial = if (parts[1].isNotEmpty()) parts[1].first().toString() else ""
-                                                        "${parts[0]} $lastInitial"
-                                                    }
-                                                    else -> {
-                                                        val firstName = parts[0]
-                                                        val middleInitial = if (parts[1].isNotEmpty()) parts[1].first().toString() else ""
-                                                        val lastInitial = if (parts.last().isNotEmpty()) parts.last().first().toString() else ""
-                                                        "$firstName $middleInitial.$lastInitial"
-                                                    }
-                                                }
-                                            }
-
-                                            val formattedName = formatChildName(childNameField.text.trim())
-                                            val lastThreeDigits = normalizedPhone.takeLast(3)
-                                            val childDocId = "$formattedName-$lastThreeDigits-${childIndex + 1}"
-
-                                            firestore.collection("children")
-                                                .document(childDocId)
-                                                .set(childData)
-                                                .addOnSuccessListener {
-                                                    Log.d("🔥", "Child $formattedName saved to Firestore with locations")
-                                                }
-                                                .addOnFailureListener { e ->
-                                                    Log.e("🔥", "Failed to save child to Firestore", e)
-                                                }
-                                        }
-                                        .addOnFailureListener { e ->
-                                            Log.e("🔥", "Failed to get parent document", e)
-                                        }
+                            // Format child name for document ID
+                            fun formatChildName(fullName: String): String {
+                                if (fullName.isBlank()) return "Unknown"
+                                val parts = fullName.trim().split(" ")
+                                return when (parts.size) {
+                                    1 -> parts[0]
+                                    2 -> {
+                                        val lastInitial = if (parts[1].isNotEmpty()) parts[1].first().toString() else ""
+                                        "${parts[0]} $lastInitial"
+                                    }
+                                    else -> {
+                                        val firstName = parts[0]
+                                        val middleInitial = if (parts[1].isNotEmpty()) parts[1].first().toString() else ""
+                                        val lastInitial = if (parts.last().isNotEmpty()) parts.last().first().toString() else ""
+                                        "$firstName $middleInitial.$lastInitial"
+                                    }
                                 }
                             }
-                            .addOnFailureListener { e ->
-                                Log.e("🔥", "Failed to merge parent fields", e)
-                            }
 
+                            val formattedName = formatChildName(childNameField.text.trim())
+                            val lastThreeDigits = normalizedPhone.takeLast(3)
+                            val childDocId = "$formattedName-$lastThreeDigits-${childIndex + 1}"
+
+                            val saveTask = firestore.collection("children")
+                                .document(childDocId)
+                                .set(childData)
+                                .addOnSuccessListener {
+                                    Log.d("🔥", "Child $formattedName saved to Firestore with locations")
+                                }
+                                .addOnFailureListener { e ->
+                                    Log.e("🔥", "Failed to save child to Firestore", e)
+                                }
+
+                            childSavePromises.add(saveTask)
+                        }
+
+                        // After all children are saved, save the parent
+                        com.google.android.gms.tasks.Tasks.whenAllComplete(childSavePromises)
+                            .addOnSuccessListener {
+                                firestore.collection("parents")
+                                    .document(normalizedPhone)
+                                    .set(updateData, SetOptions.merge())
+                                    .addOnSuccessListener {
+                                        Log.d("🔥", "Parent extra fields merged in Firestore after children saved")
+                                    }
+                                    .addOnFailureListener { e ->
+                                        Log.e("🔥", "Failed to merge parent fields", e)
+                                    }
+                            }
+                            .addOnFailureListener { e ->
+                                Log.e("🔥", "Failed to save children to Firestore", e)
+                            }
                         val childrenCsv = childrenNames.joinToString(",") { it.text }
 
                         // Save each child with their locations to Realtime Database via ViewModel

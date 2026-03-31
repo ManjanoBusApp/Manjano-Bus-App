@@ -656,39 +656,57 @@ exports.syncNewParent = onDocumentCreated("parents/{parentId}", async (event) =>
         const parentKey = parentName.toLowerCase().replace(/[^a-z0-9]/g, '_');
 
         for (const childName of childrenNames) {
-            const childKey = childName.toLowerCase().replace(/[^a-z0-9]/g, '_');
-
-            // Get child data from children collection
-            const childDoc = await firestore.collection('children')
-                .where('childName', '==', childName)
-                .where('parentName', '==', parentName)
-                .limit(1)
-                .get();
-
-            const childData = childDoc.empty ? {} : childDoc.docs[0].data();
-
-            const rtdbData = {
-                active: true,
-                childId: childKey,
-                displayName: childName,
-                eta: 'Arriving in 5 minutes',
-                parentName: parentName,
-                photoUrl: '',
-                status: 'On Route',
-                pickUpAddress: childData.pickUpAddress || '',
-                pickUpPlaceId: childData.pickUpPlaceId || '',
-                pickUpLat: childData.pickUpLat || 0,
-                pickUpLng: childData.pickUpLng || 0,
-                dropOffAddress: childData.dropOffAddress || '',
-                dropOffPlaceId: childData.dropOffPlaceId || '',
-                dropOffLat: childData.dropOffLat || 0,
-                dropOffLng: childData.dropOffLng || 0
-            };
-
-            await db.ref(`students/${childKey}`).set(rtdbData);
-            await db.ref(`parents/${parentKey}/children/${childKey}`).set(rtdbData);
-
-            logger.info(`✅ Child ${childName} synced`);
+                       const childKey = childName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+                       // Get child data from children collection FIRST
+                       const childDoc = await firestore.collection('children')
+                           .where('childName', '==', childName)
+                           .where('parentName', '==', parentName)
+                           .limit(1)
+                           .get();
+                       let childData = childDoc.empty ? {} : childDoc.docs[0].data();
+                       const hasValidFirestoreCoordinates = childData.pickUpLat && childData.pickUpLat !== 0;
+                       // Check if student already exists in Realtime DB
+                       const existingStudent = await db.ref(`students/${childKey}`).once('value');
+                       if (existingStudent.exists()) {
+                           const existingPickUpLat = existingStudent.child('pickUpLat').val();
+                           const existingPickUpLng = existingStudent.child('pickUpLng').val();
+                           const existingHasValid = existingPickUpLat && existingPickUpLat !== 0;
+                           // If Realtime DB has valid coordinates AND Firestore doesn't have valid coordinates, preserve
+                           if (existingHasValid && !hasValidFirestoreCoordinates) {
+                               logger.info(`✅ Preserving existing coordinates for ${childKey} (existing: ${existingPickUpLat})`);
+                               childData.pickUpLat = existingPickUpLat;
+                               childData.pickUpLng = existingPickUpLng;
+                               hasValidFirestoreCoordinates = true;
+                           }
+                           // If Firestore has valid coordinates, proceed to write (overwrite zeros or update)
+                           if (hasValidFirestoreCoordinates) {
+                               logger.info(`📝 Firestore has valid coordinates for ${childKey}, will update Realtime DB`);
+                           }
+                       }
+                       const rtdbData = {
+                           active: true,
+                           childId: childKey,
+                           displayName: childName,
+                           eta: childData.eta || 'Arriving in 5 minutes',
+                           parentName: parentName,
+                           photoUrl: childData.photoUrl || '',
+                           status: childData.status || 'On Route',
+                           pickUpAddress: childData.pickUpAddress || '',
+                           pickUpPlaceId: childData.pickUpPlaceId || '',
+                           pickUpLat: childData.pickUpLat || 0,
+                           pickUpLng: childData.pickUpLng || 0,
+                           dropOffAddress: childData.dropOffAddress || '',
+                           dropOffPlaceId: childData.dropOffPlaceId || '',
+                           dropOffLat: childData.dropOffLat || 0,
+                           dropOffLng: childData.dropOffLng || 0
+                       };
+                       await db.ref(`students/${childKey}`).set(rtdbData);
+                       await db.ref(`parents/${parentKey}/children/${childKey}`).set(rtdbData);
+                       if (hasValidFirestoreCoordinates) {
+                           logger.info(`✅ Child ${childName} synced with coordinates: ${childData.pickUpLat}, ${childData.pickUpLng}`);
+                       } else {
+                           logger.info(`⚠️ Child ${childName} synced without coordinates (will be updated when admin adds them)`);
+                       }
         }
 
         await db.ref(`parents/${parentKey}/active`).set(true);
@@ -768,6 +786,100 @@ exports.onChildImageUploaded = onObjectFinalized({
         }
     } else {
         logger.info(`⚠️ Child ${childKey} (or ${childKeyNoUnderscores}) not found in Realtime Database yet. Image will be used when child is reactivated.`);
+    }
+
+    return null;
+});
+
+// ==================== FUNCTION 11: SYNC CHILD UPDATE FROM FIRESTORE TO REALTIME DB ====================
+exports.syncChildUpdate = onDocumentUpdated("children/{childId}", async (event) => {
+    const beforeData = event.data.before.data();
+    const afterData = event.data.after.data();
+
+    // Check what changed
+    const changes = {};
+    const fieldsToSync = [
+        'pickUpAddress', 'pickUpPlaceId', 'pickUpLat', 'pickUpLng',
+        'dropOffAddress', 'dropOffPlaceId', 'dropOffLat', 'dropOffLng',
+        'childName', 'parentName', 'photoUrl'
+    ];
+
+    let hasChanges = false;
+    fieldsToSync.forEach(field => {
+        if (beforeData[field] !== afterData[field]) {
+            changes[field] = afterData[field];
+            hasChanges = true;
+        }
+    });
+
+    if (!hasChanges) {
+        logger.info('No relevant changes detected, skipping sync');
+        return null;
+    }
+
+    const childName = afterData.childName || beforeData.childName;
+    const parentName = afterData.parentName || beforeData.parentName;
+
+    if (!childName) {
+        logger.warn('Child name not found, cannot sync');
+        return null;
+    }
+
+    const childKey = childName.toLowerCase().replace(/[^a-z0-9]/g, '_');
+    const parentKey = parentName ? parentName.toLowerCase().replace(/[^a-z0-9]/g, '_') : null;
+
+    logger.info(`Syncing child update for ${childName} (${childKey})`);
+    logger.info(`Changes: ${JSON.stringify(changes)}`);
+
+    const db = admin.database();
+
+    // Update student node in Realtime DB
+    const studentRef = db.ref(`students/${childKey}`);
+    const studentSnapshot = await studentRef.once('value');
+
+    if (studentSnapshot.exists()) {
+        // Update only changed fields, preserve existing data
+        const updates = {};
+        Object.keys(changes).forEach(key => {
+            updates[`students/${childKey}/${key}`] = changes[key];
+        });
+
+        // Also update parent's children node if parent exists
+        if (parentKey) {
+            Object.keys(changes).forEach(key => {
+                updates[`parents/${parentKey}/children/${childKey}/${key}`] = changes[key];
+            });
+        }
+
+        await db.ref().update(updates);
+        logger.info(`✅ Synced updates for child ${childName} to Realtime DB`);
+    } else {
+        // Student doesn't exist in Realtime DB yet, create full record
+        const childData = {
+            active: true,
+            childId: childKey,
+            displayName: childName,
+            eta: afterData.eta || 'Arriving in 5 minutes',
+            parentName: parentName || '',
+            photoUrl: afterData.photoUrl || '',
+            status: afterData.status || 'On Route',
+            pickUpAddress: afterData.pickUpAddress || '',
+            pickUpPlaceId: afterData.pickUpPlaceId || '',
+            pickUpLat: afterData.pickUpLat || 0,
+            pickUpLng: afterData.pickUpLng || 0,
+            dropOffAddress: afterData.dropOffAddress || '',
+            dropOffPlaceId: afterData.dropOffPlaceId || '',
+            dropOffLat: afterData.dropOffLat || 0,
+            dropOffLng: afterData.dropOffLng || 0
+        };
+
+        await db.ref(`students/${childKey}`).set(childData);
+
+        if (parentKey) {
+            await db.ref(`parents/${parentKey}/children/${childKey}`).set(childData);
+        }
+
+        logger.info(`✅ Created new student record for ${childName} in Realtime DB`);
     }
 
     return null;
